@@ -1,0 +1,12 @@
+# 构建产物（exe 体积大，且每次构建可重新生成，不上传）
+*.exe
+builder/deploy_final.py
+
+# PyInstaller 中间产物
+builder/build_tmp/
+builder/dist/
+build/
+
+# Python 缓存
+__pycache__/
+*.pyc
