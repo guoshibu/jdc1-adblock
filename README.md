@@ -5,6 +5,7 @@
 
 **作者**：[guoshibu](https://github.com/guoshibu)
 
+[![Version](https://img.shields.io/badge/Version-v1.1.0-orange.svg)](https://github.com/guoshibu/jdc1-adblock/releases)
 [![Platform](https://img.shields.io/badge/Platform-MT7621AT%20MIPS-blue.svg)](#)
 [![Firmware](https://img.shields.io/badge/Firmware-JDC4.0.0.r6636_ssh-important.svg)](#)
 [![AdGuard Home](https://img.shields.io/badge/AdGuard%20Home-v0.107.80-brightgreen.svg)](#)
@@ -41,6 +42,16 @@
 - 支持三种规则格式自动转换：`dnsmasq(address=/域名/)`、`AdBlock(||域名^)`、`hosts(0.0.0.0 域名)`
 - 多规则源可合并、可自定义（最多 3 条自定义源）
 - dnsmasq 与 AGH 可独立开关，互不影响
+
+**规则源管理（v1.1）**：在管理页「规则源」区，4 个预设源 + 3 个自定义槽位均可勾选启用，操作即时生效、页面不刷新。
+
+- 自定义源填好「名称 + URL」后：
+  - 点「保存」→ 后端**真实下载**并数有效规则条数（≥50 条才算有效），成功显示 `✓ 已验证 N 条`，失败显示红色原因且**保留输入内容**可改
+  - 或直接勾选复选框 → 一步完成"验证 + 启用"
+  - 只有验证通过的源才能启用；无效/超时的源勾不上，杜绝"显示启用但没生效"
+  - 点「删除」移除该槽位
+- 启用状态存在 `/etc/adblock/preset_flags`（预设）和 `/etc/adblock/custom1~3` 第 3 列（自定义），验证状态存第 4 列（`OK:N` / `FAIL:原因`）；`adblock_rebuild_sources.sh` 据此重建 `sources.list`——停用的源整行注释，`adblock_update.sh` 自动跳过
+- 阈值说明：单源 ≥50 条即通过（300 条的小规则源合法）；`adblock_update.sh` 另有"整体规则库 <1000 条不写入"的保护线，两者互不冲突
 
 ### 系统监控（Web 管理页）
 
@@ -106,10 +117,11 @@ JDC-1-官改插件/
 │   ├── deploy.py            # exe 源码模板
 │   └── build_deploy.py      # 构建脚本（注入脚本内容 + 打包）
 ├── scripts/                 # 部署到路由器的脚本
-│   ├── adblock.cgi          # 管理页主页面（HTML+CSS+JS，约 31KB）
+│   ├── adblock.cgi          # 管理页主页面（HTML+CSS+JS，约 39KB）
 │   ├── adblock_status.cgi   # 实时状态 JSON 接口（供前端轮询）
 │   ├── proc_monitor.sh      # 进程数据采集守护（常驻，5s/次）
-│   ├── adblock_update.sh    # dnsmasq 去广告规则更新
+│   ├── adblock_update.sh    # dnsmasq 去广告规则更新（下载所有源+转换+去重）
+│   ├── adblock_rebuild_sources.sh # 规则源重建：从预设标志+自定义源合成 sources.list
 │   ├── adguard_install.sh   # AdGuard Home 安装/启动/停止脚本
 │   └── sources.list         # dnsmasq 规则源列表（名称|URL）
 ├── web/                     # Web 后台菜单入口
@@ -134,6 +146,7 @@ JDC-1-官改插件/
 | `adblock_status.cgi` | `/www/cgi-bin/adblock_status.cgi` | JSON 状态接口    | overlay |
 | `proc_monitor.sh`    | `/usr/bin/proc_monitor.sh`        | 进程采集守护       | overlay |
 | `adblock_update.sh`  | `/usr/bin/adblock_update.sh`      | dnsmasq 规则更新 | overlay |
+| `adblock_rebuild_sources.sh` | `/usr/bin/adblock_rebuild_sources.sh` | 规则源重建（v1.1 新增） | overlay |
 | `adguard_install.sh` | `/usr/bin/adguard_install.sh`     | AGH 安装/启动    | overlay |
 | `sources.list`       | `/etc/adblock/sources.list`       | dnsmasq 规则源  | overlay |
 | `web/main_patched.html` | `/www/PC/main.html`             | 注入「去广告」菜单项   | overlay |
