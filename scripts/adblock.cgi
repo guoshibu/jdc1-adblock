@@ -29,68 +29,190 @@ PRESET4_URL="https://ghfast.top/https://raw.githubusercontent.com/AdguardTeam/Ad
 # --- HTML 转义 ---
 esc() { echo "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'; }
 
+# --- URL 解码（通用 %XX，逐字节还原 UTF-8）---
+urldecode() {
+    printf '%b' "$(printf '%s' "$1" | sed 's/+/ /g; s/%\([0-9A-Fa-f][0-9A-Fa-f]\)/\\x\1/g')"
+}
+
+# --- JSON 输出辅助：前端 fetch 带 format=json 时返回 JSON，普通表单仍 302 ---
+json_esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\n'; }
+finish() {
+    if [ "$FMT_JSON" = "1" ]; then
+        echo "Content-Type: application/json; charset=utf-8"
+        echo ""
+        echo "{\"ok\":$JSON_OK,\"msg\":\"$(json_esc "$JSON_MSG")\",\"rules\":${JSON_RULES:-0}}"
+    else
+        echo "Status: 302 Found"
+        echo "Location: /cgi-bin/adblock.cgi"
+        echo ""
+    fi
+    exit 0
+}
+fail_json() { JSON_OK=false; JSON_MSG="$1"; JSON_RULES=0; finish; }
+
+# 取 POST 参数（兼容首参数与 & 分隔）
+get_param() {
+    _v=$(printf '%s' "$POST_DATA" | sed -n "s/.*[?&]$1=\\([^&]*\\).*/\\1/p")
+    [ -z "$_v" ] && _v=$(printf '%s' "$POST_DATA" | sed -n "s/^$1=\\([^&]*\\).*/\\1/p")
+    printf '%s' "$_v"
+}
+
+# 真实下载并校验自定义源，成功写入 customN 第 4 列 OK:条数
+# 参数：$1=slot $2=name $3=url $4=on(可选；不传则保留原启用位)
+verify_slot() {
+    _slot=$1; _name=$2; _url=$3; _on=$4
+    case "$_slot" in 1|2|3) ;; *) fail_json "无效槽位";; esac
+    _cf="/etc/adblock/custom$_slot"
+    # 验证失败也落盘 FAIL 状态，让行内提示刷新后仍可见；失败即停用，杜绝假启用
+    verify_fail() {
+        printf '%s|%s|0|FAIL:%s\n' "$_name" "$_url" "$1" > "$_cf"
+        sh /usr/bin/adblock_rebuild_sources.sh >/dev/null 2>&1
+        JSON_OK=false; JSON_MSG="$1"; JSON_RULES=0; finish
+    }
+    if [ -z "$_name" ]; then
+        _name=$(printf '%s' "$_url" | sed -n 's#^[a-zA-Z]*://\([^/]*\)/.*#\1#p' | sed 's/^.*@//')
+        [ -z "$_name" ] && _name="自定义源$_slot"
+    fi
+    printf '%s' "$_url" | grep -qE '^https?://' || verify_fail "格式错误：需 http(s):// 开头"
+    curl -sS --connect-timeout 10 --max-time 25 -o /tmp/adblock.verify.dl "$_url" 2>/dev/null || verify_fail "连接失败/超时"
+    [ -s /tmp/adblock.verify.dl ] || verify_fail "下载内容为空"
+    # 数有效规则：与 adblock_update.sh 完全相同的三种格式转换 + 整行去重
+    _cnt=$(
+      {
+        grep -E '^address=/[^/]+/' /tmp/adblock.verify.dl
+        grep -E '^\|\|' /tmp/adblock.verify.dl | grep -v '^@@' | sed -E 's#^\|\|([^/^*^]+)\^.*#address=/\1/0.0.0.0#'
+        grep -E '^(0\.0\.0\.0|127\.0\.0\.1)[[:space:]]+' /tmp/adblock.verify.dl | awk '{print "address=/"$2"/0.0.0.0"}'
+      } | sort -u | wc -l
+    )
+    rm -f /tmp/adblock.verify.dl
+    # 单源阈值 50：300 条小规则源合法；1000 是整体规则库保护线，不适用单源
+    [ "$_cnt" -ge 50 ] || verify_fail "有效规则仅 $_cnt 条（<50），判定无效"
+    if [ -n "$_on" ]; then
+        [ "$_on" = "1" ] && _f=1 || _f=0
+    else
+        _f=$(awk -F'|' '{print $3}' "$_cf" 2>/dev/null)
+        [ "$_f" != "1" ] && _f=0
+    fi
+    printf '%s|%s|%s|OK:%s\n' "$_name" "$_url" "$_f" "$_cnt" > "$_cf"
+    sh /usr/bin/adblock_rebuild_sources.sh >/dev/null 2>&1
+    /usr/bin/adblock_update.sh >/dev/null 2>&1 &
+    JSON_OK=true; JSON_MSG="已验证 $_cnt 条规则"; JSON_RULES=$_cnt
+}
+
 # --- 处理 POST ---
 if [ "$REQUEST_METHOD" = "POST" ]; then
     read -r POST_DATA
-
-    ACTION=$(echo "$POST_DATA" | sed -n 's/.*[?&]action=\([^&]*\).*/\1/p')
-    [ -z "$ACTION" ] && ACTION=$(echo "$POST_DATA" | sed -n 's/^action=\([^&]*\).*/\1/p')
+    ACTION=$(printf '%s' "$POST_DATA" | sed -n 's/.*[?&]action=\([^&]*\).*/\1/p')
+    [ -z "$ACTION" ] && ACTION=$(printf '%s' "$POST_DATA" | sed -n 's/^action=\([^&]*\).*/\1/p')
+    printf '%s' "$POST_DATA" | grep -q 'format=json' && FMT_JSON=1 || FMT_JSON=0
+    JSON_OK=false; JSON_MSG=""; JSON_RULES=0
 
     case "$ACTION" in
         enable)
             rm -f "$DISABLE_FLAG"
             /usr/bin/adblock_update.sh >/dev/null 2>&1 &
+            JSON_OK=true; JSON_MSG="已启用"
             ;;
         disable)
             touch "$DISABLE_FLAG"
             /usr/bin/adblock_update.sh >/dev/null 2>&1 &
+            JSON_OK=true; JSON_MSG="已停用"
             ;;
         update)
             /usr/bin/adblock_update.sh >/dev/null 2>&1 &
+            JSON_OK=true; JSON_MSG="已触发更新"
             ;;
-        save_sources)
-            mkdir -p /etc/adblock
-            : > "$SRC_LIST"
-            echo "# 去广告规则源列表：名称|URL" >> "$SRC_LIST"
-            if echo "$POST_DATA" | grep -q "src_p1=on"; then echo "$PRESET1_NAME|$PRESET1_URL" >> "$SRC_LIST"; fi
-            if echo "$POST_DATA" | grep -q "src_p2=on"; then echo "$PRESET2_NAME|$PRESET2_URL" >> "$SRC_LIST"; fi
-            if echo "$POST_DATA" | grep -q "src_p3=on"; then echo "$PRESET3_NAME|$PRESET3_URL" >> "$SRC_LIST"; fi
-            if echo "$POST_DATA" | grep -q "src_p4=on"; then echo "$PRESET4_NAME|$PRESET4_URL" >> "$SRC_LIST"; fi
-            for i in 1 2 3; do
-                CUSTOM=$(echo "$POST_DATA" | sed -n "s/.*custom$i=\([^&]*\).*/\1/p")
-                CUSTOM=$(echo "$CUSTOM" | sed 's/%7C/|/g; s/%26/\&/g; s/%2F/\//g; s/%3A/:/g; s/%3D/=/g; s/+/\ /g')
-                if [ -n "$CUSTOM" ] && echo "$CUSTOM" | grep -q '|'; then
-                    echo "$CUSTOM" >> "$SRC_LIST"
+        verify_custom)
+            SLOT=$(get_param slot)
+            CNAME=$(get_param cname); CNAME=$(urldecode "$CNAME")
+            CURL=$(get_param curl); CURL=$(urldecode "$CURL")
+            ON=$(get_param on)
+            verify_slot "$SLOT" "$CNAME" "$CURL" "$ON"
+            ;;
+        save_custom)
+            SLOT=$(get_param slot)
+            CNAME=$(get_param cname); CNAME=$(urldecode "$CNAME")
+            CURL=$(get_param curl); CURL=$(urldecode "$CURL")
+            case "$SLOT" in 1|2|3) ;; *) fail_json "无效槽位";; esac
+            if [ -z "$CURL" ]; then
+                rm -f "/etc/adblock/custom$SLOT"
+                sh /usr/bin/adblock_rebuild_sources.sh >/dev/null 2>&1
+                /usr/bin/adblock_update.sh >/dev/null 2>&1 &
+                JSON_OK=true; JSON_MSG="已清空槽位 $SLOT"; JSON_RULES=0
+            else
+                verify_slot "$SLOT" "$CNAME" "$CURL" ""
+            fi
+            ;;
+        custom_toggle)
+            # 兼容旧调用：勾选 = 真实验证 + 启用，一步到位
+            SLOT=$(get_param slot)
+            CNAME=$(get_param cname); CNAME=$(urldecode "$CNAME")
+            CURL=$(get_param curl); CURL=$(urldecode "$CURL")
+            ONOFF=$(get_param on)
+            verify_slot "$SLOT" "$CNAME" "$CURL" "$ONOFF"
+            ;;
+        toggle_src)
+            # line 1..4=预设 / 5..7=自定义；自定义必须已验证 OK 才能启用
+            LINE=$(get_param line)
+            ONOFF=$(get_param on)
+            [ -z "$LINE" ] && fail_json "缺少 line 参数"
+            [ "$ONOFF" = "1" ] && NEWFLAG=1 || NEWFLAG=0
+            if [ "$LINE" -ge 1 ] && [ "$LINE" -le 4 ]; then
+                PF="/etc/adblock/preset_flags"
+                [ -f "$PF" ] || printf '1\n1\n1\n1\n' > "$PF"
+                awk -v n="$LINE" -v f="$NEWFLAG" 'NR==n{print f;next}{print}' "$PF" > "$PF.tmp"
+                while [ "$(wc -l < "$PF.tmp")" -lt 4 ]; do echo 1 >> "$PF.tmp"; done
+                mv "$PF.tmp" "$PF"
+                JSON_OK=true; JSON_MSG="已切换预设源 $LINE"
+            else
+                SLOT=$((LINE-4))
+                case "$SLOT" in 1|2|3) ;; *) fail_json "无效槽位";; esac
+                CF="/etc/adblock/custom$SLOT"
+                [ -f "$CF" ] || fail_json "该槽位尚未保存规则"
+                if [ "$NEWFLAG" = "1" ]; then
+                    V=$(awk -F'|' '{print $4}' "$CF")
+                    case "$V" in
+                        OK:*) ;;
+                        *) fail_json "该源未验证或验证失败，请先点「保存」验证" ;;
+                    esac
                 fi
-            done
+                NAME=$(awk -F'|' '{print $1}' "$CF")
+                URL=$(awk -F'|' '{print $2}' "$CF")
+                V=$(awk -F'|' '{print $4}' "$CF")
+                printf '%s|%s|%s|%s\n' "$NAME" "$URL" "$NEWFLAG" "$V" > "$CF"
+                if [ "$NEWFLAG" = "1" ]; then
+                    JSON_OK=true; JSON_MSG="已启用槽位 $SLOT"
+                else
+                    JSON_OK=true; JSON_MSG="已停用槽位 $SLOT"
+                fi
+            fi
+            sh /usr/bin/adblock_rebuild_sources.sh >/dev/null 2>&1
             /usr/bin/adblock_update.sh >/dev/null 2>&1 &
             ;;
         save_mirror)
-            # 保存 AdGuard 下载源（支持预设 + 自定义）
-            MIRROR=$(echo "$POST_DATA" | sed -n 's/.*agh_mirror=\([^&]*\).*/\1/p')
-            # 若选了自定义，取自定义输入框的值
+            MIRROR=$(get_param agh_mirror)
             if [ "$MIRROR" = "custom" ]; then
-                MIRROR=$(echo "$POST_DATA" | sed -n 's/.*agh_mirror_custom=\([^&]*\).*/\1/p')
-                # URL 解码
-                MIRROR=$(echo "$MIRROR" | sed 's/%2F/\//g; s/%3A/:/g; s/%3D/=/g; s/%2E/./g; s/+/\ /g')
+                MIRROR=$(get_param agh_mirror_custom)
+                MIRROR=$(printf '%s' "$MIRROR" | sed 's/%2F/\//g; s/%3A/:/g; s/%3D/=/g; s/%2E/./g; s/+/ /g')
             fi
-            [ -n "$MIRROR" ] && [ "$MIRROR" != "custom" ] && echo "$MIRROR" > "$AGH_MIRROR_FILE"
+            [ -n "$MIRROR" ] && [ "$MIRROR" != "custom" ] && printf '%s\n' "$MIRROR" > "$AGH_MIRROR_FILE"
+            JSON_OK=true; JSON_MSG="已保存下载源"
             ;;
         agh_install)
             /usr/bin/adguard_install.sh install >/dev/null 2>&1 &
+            JSON_OK=true; JSON_MSG="已提交安装"
             ;;
         agh_start)
             /usr/bin/adguard_install.sh start >/dev/null 2>&1 &
+            JSON_OK=true; JSON_MSG="已提交启动"
             ;;
         agh_stop)
             /usr/bin/adguard_install.sh stop >/dev/null 2>&1 &
+            JSON_OK=true; JSON_MSG="已提交停止"
             ;;
+        *) fail_json "未知操作 $ACTION" ;;
     esac
-
-    echo "Status: 302 Found"
-    echo "Location: /cgi-bin/adblock.cgi"
-    echo ""
-    exit 0
+    finish
 fi
 
 # ============================================================
@@ -105,11 +227,44 @@ TIME=$(cat "$TIME_FILE" 2>/dev/null || echo "从未更新")
 
 CURRENT=""
 [ -f "$SRC_LIST" ] && CURRENT=$(grep -v '^#' "$SRC_LIST" | grep -v '^$')
+
+# 预设源启用状态来自 /etc/adblock/preset_flags（4 行 0/1，缺省 1）
+PF="/etc/adblock/preset_flags"
 CHK1=""; CHK2=""; CHK3=""; CHK4=""
-echo "$CURRENT" | grep -qF "$PRESET1_NAME|$PRESET1_URL" && CHK1="checked"
-echo "$CURRENT" | grep -qF "$PRESET2_NAME|$PRESET2_URL" && CHK2="checked"
-echo "$CURRENT" | grep -qF "$PRESET3_NAME|$PRESET3_URL" && CHK3="checked"
-echo "$CURRENT" | grep -qF "$PRESET4_NAME|$PRESET4_URL" && CHK4="checked"
+_i=1
+for _v in 1 2 3 4; do
+    _f=$(sed -n "${_i}p" "$PF" 2>/dev/null)
+    [ -z "$_f" ] && _f=1
+    [ "$_f" = "1" ] && eval "CHK$_i=checked"
+    eval "PST$_i=\"\"; PSTC$_i=\"\""
+    if [ "$_f" = "1" ]; then eval "PST$_i=\"已启用（预设，固定可信）\"; PSTC$_i=ok"; else eval "PST$_i=\"已停用\""; fi
+    _i=$((_i+1))
+done
+
+# 自定义源回显：从 custom1..3 读 "名称|URL|启用位|验证状态"
+CNAME1=""; CURL1=""; CCHK1=""; CSTAT1="未验证"; CSTAT1C=""
+CNAME2=""; CURL2=""; CCHK2=""; CSTAT2="未验证"; CSTAT2C=""
+CNAME3=""; CURL3=""; CCHK3=""; CSTAT3="未验证"; CSTAT3C=""
+for i in 1 2 3; do
+    CF="/etc/adblock/custom$i"
+    [ -f "$CF" ] || continue
+    _line=$(cat "$CF")
+    _n=$(echo "$_line" | awk -F'|' '{print $1}')
+    _u=$(echo "$_line" | awk -F'|' '{print $2}')
+    _f=$(echo "$_line" | awk -F'|' '{print $3}')
+    _v=$(echo "$_line" | awk -F'|' '{print $4}')
+    [ -z "$_f" ] && _f=0
+    case "$_v" in
+        OK:*)   _st="✓ 已验证 $(printf '%s' "$_v" | sed 's/^OK://') 条"; _sc="ok" ;;
+        FAIL:*) _st="✗ $(esc "$(printf '%s' "$_v" | sed 's/^FAIL://')")"; _sc="err" ;;
+        *)      _st="未验证"; _sc="" ;;
+    esac
+    case "$i" in
+        1) CNAME1="$_n"; CURL1="$_u"; [ "$_f" = "1" ] && CCHK1=checked; CSTAT1="$_st"; CSTAT1C="$_sc" ;;
+        2) CNAME2="$_n"; CURL2="$_u"; [ "$_f" = "1" ] && CCHK2=checked; CSTAT2="$_st"; CSTAT2C="$_sc" ;;
+        3) CNAME3="$_n"; CURL3="$_u"; [ "$_f" = "1" ] && CCHK3=checked; CSTAT3="$_st"; CSTAT3C="$_sc" ;;
+    esac
+done
 
 # --- AdGuard Home 状态 ---
 AGH_STATE="not_installed"
@@ -239,6 +394,14 @@ table{width:100%;border-collapse:collapse;font-size:14px}
 th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eee}
 th{font-size:12px;color:#888;font-weight:600}
 .ci{width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;margin-bottom:8px;box-sizing:border-box}
+.ci-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.ci-row .ci{margin-bottom:0}
+.src-row{display:flex;gap:8px;align-items:flex-start;margin-bottom:12px}
+.src-row>input[type=checkbox]{margin-top:12px}
+.src-status{font-size:11px;color:#999;padding-left:2px;margin-top:-2px}
+.src-status.ok{color:#16a34a}
+.src-status.err{color:#dc2626}
+.src-status.wait{color:#d97706}
 select{padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px;margin-right:8px}
 .hint{font-size:12px;color:#999;margin-top:8px}
 input[type=checkbox]{transform:scale(1.15);margin-right:6px}
@@ -396,23 +559,116 @@ input[type=checkbox]{transform:scale(1.15);margin-right:6px}
 <!-- 规则源（子区块） -->
 <div style="border-top:1px dashed #e5e7eb;padding-top:14px;margin-top:4px">
 <h2 style="font-size:15px">规则源</h2>
-<form method="POST">
+<script>
+// 统一异步 API：带 format=json，后端返回 JSON，页面不刷新
+async function api(action, params){
+  var body = new URLSearchParams();
+  body.append('action', action);
+  body.append('format', 'json');
+  for (var k in params) body.append(k, params[k]);
+  var r = await fetch('/cgi-bin/adblock.cgi', {method:'POST', body:body});
+  return await r.json();
+}
+function setStatus(slot, msg, cls){
+  var el = document.getElementById('st'+slot);
+  if(el){ el.textContent = msg; el.className = 'src-status '+(cls||''); }
+}
+function setBusy(slot, busy){
+  var b = document.getElementById('sv'+slot); if(b) b.disabled = busy;
+}
+// 点「保存」：真下载验证规则数；输入框内容保留不动
+async function doVerify(slot){
+  var n = document.getElementsByName('cname'+slot)[0].value;
+  var u = document.getElementsByName('curl'+slot)[0].value;
+  setStatus(slot, '校验中…（最多 25 秒）', 'wait');
+  setBusy(slot, true);
+  try {
+    var res = await api('verify_custom', {slot:slot, cname:n, curl:u});
+    setStatus(slot, res.msg, res.ok ? 'ok' : 'err');
+  } catch(e){ setStatus(slot, '请求失败：'+e, 'err'); }
+  finally { setBusy(slot, false); }
+}
+// 预设源复选框：只切启用状态，不刷新页面
+async function doToggle(line, el){
+  try {
+    var res = await api('toggle_src', {line:line, on:el.checked?'1':'0'});
+    if(!res.ok){ el.checked = !el.checked; alert(res.msg); return; }
+    var st = document.getElementById('pst'+line);
+    if(st){
+      st.textContent = el.checked ? '已启用（预设，固定可信）' : '已停用';
+      st.className = 'src-status ' + (el.checked ? 'ok' : '');
+    }
+  } catch(e){ el.checked = !el.checked; alert('请求失败：'+e); }
+}
+// 删除自定义源：清空名称/URL 走 save_custom（后端会 rm customN）
+async function doDelete(slot){
+  if(!confirm('确定删除这个自定义源？')) return;
+  try {
+    var res = await api('save_custom', {slot:slot, cname:'', curl:''});
+    if(!res.ok){ alert(res.msg); return; }
+    document.getElementsByName('cname'+slot)[0].value = '';
+    document.getElementsByName('curl'+slot)[0].value = '';
+    var cb = document.getElementById('ck'+slot); if(cb) cb.checked = false;
+    setStatus(slot, '已删除', '');
+  } catch(e){ alert('请求失败：'+e); }
+}
+// 自定义源复选框：勾选时先真实验证再启用；取消只切状态
+async function doCustomToggle(slot, el){
+  var n = document.getElementsByName('cname'+slot)[0].value;
+  var u = document.getElementsByName('curl'+slot)[0].value;
+  if(el.checked){
+    if(u.replace(/^\s+|\s+$/g,'')===''){
+      alert('请先在该行填写规则地址'); el.checked=false; return;
+    }
+    setStatus(slot, '校验中…（最多 25 秒）', 'wait');
+    setBusy(slot, true);
+    try {
+      var res = await api('verify_custom', {slot:slot, cname:n, curl:u, on:'1'});
+      setStatus(slot, res.msg, res.ok ? 'ok' : 'err');
+      if(!res.ok) el.checked = false;
+    } catch(e){ setStatus(slot, '请求失败：'+e, 'err'); el.checked=false; }
+    finally { setBusy(slot, false); }
+  } else {
+    try {
+      var res = await api('toggle_src', {line:slot+4, on:'0'});
+      if(!res.ok) el.checked = true;
+      else setStatus(slot, '已停用', '');
+    } catch(e){ el.checked = true; alert('请求失败：'+e); }
+  }
+}
+</script>
 <table>
 <tr><th style="width:50px">启用</th><th>名称</th><th>地址</th></tr>
-<tr><td><input type="checkbox" name="src_p1" ${CHK1}></td><td>${PRESET1_NAME}</td><td style="color:#666;font-size:12px;word-break:break-all">${PRESET1_URL}</td></tr>
-<tr><td><input type="checkbox" name="src_p2" ${CHK2}></td><td>${PRESET2_NAME}</td><td style="color:#666;font-size:12px;word-break:break-all">${PRESET2_URL}</td></tr>
-<tr><td><input type="checkbox" name="src_p3" ${CHK3}></td><td>${PRESET3_NAME}</td><td style="color:#666;font-size:12px;word-break:break-all">${PRESET3_URL}</td></tr>
-<tr><td><input type="checkbox" name="src_p4" ${CHK4}></td><td>${PRESET4_NAME}</td><td style="color:#666;font-size:12px;word-break:break-all">${PRESET4_URL}</td></tr>
+<tr><td><input type="checkbox" ${CHK1} onchange="doToggle(1,this)"></td><td>${PRESET1_NAME}<div class="src-status ${PSTC1}" id="pst1">${PST1}</div></td><td style="color:#666;font-size:12px;word-break:break-all">${PRESET1_URL}</td></tr>
+<tr><td><input type="checkbox" ${CHK2} onchange="doToggle(2,this)"></td><td>${PRESET2_NAME}<div class="src-status ${PSTC2}" id="pst2">${PST2}</div></td><td style="color:#666;font-size:12px;word-break:break-all">${PRESET2_URL}</td></tr>
+<tr><td><input type="checkbox" ${CHK3} onchange="doToggle(3,this)"></td><td>${PRESET3_NAME}<div class="src-status ${PSTC3}" id="pst3">${PST3}</div></td><td style="color:#666;font-size:12px;word-break:break-all">${PRESET3_URL}</td></tr>
+<tr><td><input type="checkbox" ${CHK4} onchange="doToggle(4,this)"></td><td>${PRESET4_NAME}<div class="src-status ${PSTC4}" id="pst4">${PST4}</div></td><td style="color:#666;font-size:12px;word-break:break-all">${PRESET4_URL}</td></tr>
 </table>
 
-<p class="hint" style="margin:12px 0 8px">自定义源（格式：名称|URL，最多 3 个）：</p>
-<input class="ci" type="text" name="custom1" placeholder="名称|URL（可选）">
-<input class="ci" type="text" name="custom2" placeholder="名称|URL（可选）">
-<input class="ci" type="text" name="custom3" placeholder="名称|URL（可选）">
-
-<button class="btn btn-blue" name="action" value="save_sources" style="margin-top:8px">保存规则源</button>
+<p class="hint" style="margin:12px 0 8px">自定义源（最多 3 个）：点「保存」会真实下载并数规则条数（≥50 条通过），失败时输入内容保留可改；勾选会自动验证并启用。未验证的地址无法启用。</p>
+<div class="src-row">
+<input type="checkbox" ${CCHK1} id="ck1" onchange="doCustomToggle(1,this)" title="启用/停用">
+<div style="flex:1;min-width:0">
+<div class="ci-row"><input class="ci" style="flex:0 0 24%" type="text" name="cname1" value="$(esc "$CNAME1")" placeholder="名称"><input class="ci" style="flex:1" type="text" name="curl1" value="$(esc "$CURL1")" placeholder="https://... 规则地址"><button class="btn btn-blue" id="sv1" type="button" onclick="doVerify(1)">保存</button><button class="btn btn-red" id="dl1" type="button" onclick="doDelete(1)">删除</button></div>
+<div class="src-status ${CSTAT1C}" id="st1">${CSTAT1}</div>
+</div>
+</div>
+<div class="src-row">
+<input type="checkbox" ${CCHK2} id="ck2" onchange="doCustomToggle(2,this)" title="启用/停用">
+<div style="flex:1;min-width:0">
+<div class="ci-row"><input class="ci" style="flex:0 0 24%" type="text" name="cname2" value="$(esc "$CNAME2")" placeholder="名称"><input class="ci" style="flex:1" type="text" name="curl2" value="$(esc "$CURL2")" placeholder="https://... 规则地址"><button class="btn btn-blue" id="sv2" type="button" onclick="doVerify(2)">保存</button><button class="btn btn-red" id="dl2" type="button" onclick="doDelete(2)">删除</button></div>
+<div class="src-status ${CSTAT2C}" id="st2">${CSTAT2}</div>
+</div>
+</div>
+<div class="src-row">
+<input type="checkbox" ${CCHK3} id="ck3" onchange="doCustomToggle(3,this)" title="启用/停用">
+<div style="flex:1;min-width:0">
+<div class="ci-row"><input class="ci" style="flex:0 0 24%" type="text" name="cname3" value="$(esc "$CNAME3")" placeholder="名称"><input class="ci" style="flex:1" type="text" name="curl3" value="$(esc "$CURL3")" placeholder="https://... 规则地址"><button class="btn btn-blue" id="sv3" type="button" onclick="doVerify(3)">保存</button><button class="btn btn-red" id="dl3" type="button" onclick="doDelete(3)">删除</button></div>
+<div class="src-status ${CSTAT3C}" id="st3">${CSTAT3}</div>
+</div>
+</div>
 </form>
-<p class="hint">支持三种格式：dnsmasq(address=/域名/)、AdBlock(||域名^)、hosts(0.0.0.0 域名)，保存后自动转换。</p>
+<p class="hint">支持三种格式：dnsmasq(address=/域名/)、AdBlock(||域名^)、hosts(0.0.0.0 域名)，保存时按相同逻辑转换并去重计数。预设源固定可信不参与验证；自定义源必须验证通过才生效。</p>
 </div>
 </div>
 

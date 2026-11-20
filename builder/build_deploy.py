@@ -61,6 +61,7 @@ FILES = {
     "scripts/adblock_status.cgi": os.path.join(BASE, "scripts", "adblock_status.cgi"),
     "scripts/proc_monitor.sh": os.path.join(BASE, "scripts", "proc_monitor.sh"),
     "scripts/adblock_update.sh": os.path.join(BASE, "scripts", "adblock_update.sh"),
+    "scripts/adblock_rebuild_sources.sh": os.path.join(BASE, "scripts", "adblock_rebuild_sources.sh"),
     "scripts/adguard_install.sh": os.path.join(BASE, "scripts", "adguard_install.sh"),
     "scripts/sources.list": os.path.join(BASE, "scripts", "sources.list"),
     "web/main_patched.html": os.path.join(BASE, "web", "main_patched.html"),

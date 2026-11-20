@@ -58,7 +58,7 @@ done
 
 # shell 脚本 → /usr/bin/
 mkdir -p /usr/bin
-for sh in proc_monitor.sh adblock_update.sh adguard_install.sh; do
+for sh in proc_monitor.sh adblock_update.sh adguard_install.sh adblock_rebuild_sources.sh; do
     if [ -f "$SCRIPTS_DIR/$sh" ]; then
         cp "$SCRIPTS_DIR/$sh" "/usr/bin/$sh"
         chmod 755 "/usr/bin/$sh"
@@ -188,7 +188,7 @@ fi
 log ""
 log "--- [5/5] 部署完成，文件清单 ---"
 log "已部署文件（可手动 md5sum 核对）："
-for f in /www/cgi-bin/adblock.cgi /www/cgi-bin/adblock_status.cgi /usr/bin/proc_monitor.sh /usr/bin/adblock_update.sh /usr/bin/adguard_install.sh /etc/adblock/sources.list; do
+for f in /www/cgi-bin/adblock.cgi /www/cgi-bin/adblock_status.cgi /usr/bin/proc_monitor.sh /usr/bin/adblock_update.sh /usr/bin/adblock_rebuild_sources.sh /usr/bin/adguard_install.sh /etc/adblock/sources.list; do
     [ -f "$f" ] && log "  $(md5sum "$f" 2>/dev/null | cut -d' ' -f1)  $f"
 done
 
