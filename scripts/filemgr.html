@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JDC 文件管理</title>
+<style>
+:root{--bg:#f5f6f8;--panel:#fff;--panel2:#f8f9fb;--line:#e5e7eb;--text:#333;--muted:#888;--blue:#2563eb;--green:#16a34a;--orange:#d97706;--red:#dc2626}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;display:flex;flex-direction:column}
+.wrap{max-width:1100px;width:100%;margin:0 auto;padding:14px;display:flex;flex-direction:column;flex:1;min-height:0;gap:10px}
+.bar{background:var(--panel);border-radius:9px;padding:10px 12px;box-shadow:0 1px 3px rgba(0,0,0,.06);display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:none}
+.bar select,.bar input[type=text]{border:1px solid #ddd;border-radius:6px;padding:6px 9px;font-size:12px;outline:none;background:#fff;color:var(--text)}
+.bar select:focus,.bar input[type=text]:focus{border-color:var(--blue)}
+button{background:#fff;border:1px solid #ddd;color:var(--text);border-radius:6px;padding:6px 11px;font-size:12px;cursor:pointer;transition:.15s}
+button:hover{border-color:var(--blue);color:var(--blue)}
+button.primary{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600}
+button.primary:hover{filter:brightness(1.08);color:#fff}
+button.danger:hover{border-color:var(--red);color:var(--red)}
+.progress-wrap{position:fixed;top:18px;left:50%;transform:translateX(-50%);background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px 16px;box-shadow:0 4px 20px rgba(0,0,0,.15);display:none;z-index:300;min-width:320px}
+.progress-wrap.show{display:block}
+.progress-wrap .pt{font-size:12px;margin-bottom:6px}
+.progress-wrap .pb{height:6px;background:#e5e7eb;border-radius:3px;overflow:hidden}
+.progress-wrap .pb i{display:block;height:100%;background:var(--blue);width:0;transition:width .2s}
+.spacer{flex:1}
+.crumb{font-size:12px;color:var(--muted);flex:none;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.crumb a{color:var(--blue);cursor:pointer;text-decoration:none}
+.crumb a:hover{text-decoration:underline}
+.crumb .sep{color:#bbb}
+.list-card{background:var(--panel);border-radius:9px;box-shadow:0 1px 3px rgba(0,0,0,.06);flex:1;min-height:180px;display:flex;flex-direction:column;overflow:hidden}
+.tbl-scroll{overflow:auto;flex:1;min-height:0}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;color:var(--muted);font-size:11px;font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);z-index:1}
+td{padding:8px 10px;border-bottom:1px solid #f0f0f0;vertical-align:middle}
+tr:hover td{background:#f8fafc}
+.fname{font-weight:600;cursor:pointer}
+.fname:hover{color:var(--blue)}
+.fname .ico{display:inline-block;width:16px;text-align:center;margin-right:5px}
+.fname.dir .ico{color:var(--orange)}
+.fname.file .ico{color:var(--blue)}
+.muted{color:var(--muted);font-size:11px}
+.ops{white-space:nowrap;text-align:right}
+.ops button{padding:3px 7px;font-size:10px;margin-left:3px;border-radius:4px;font-weight:600}
+.op-blue{border-color:#bfdbfe;color:#1d4ed8;background:#eff6ff}
+.op-green{border-color:#bbf7d0;color:#15803d;background:#f0fdf4}
+.op-red{border-color:#fecaca;color:#b91c1c;background:#fef2f2}
+.op-gray{border-color:#e2e8f0;color:#475569;background:#f8fafc}
+.empty{text-align:center;color:var(--muted);padding:36px 0}
+/* 弹窗 */
+.modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);display:none;z-index:150;align-items:center;justify-content:center}
+.modal.show{display:flex}
+.modal-panel{background:#fff;border-radius:10px;width:min(480px,92vw);max-height:92vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.3)}
+#editModal .modal-panel{width:min(720px,94vw)}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:12px 17px;border-bottom:1px solid var(--line)}
+.modal-head b{font-size:15px;color:#1a1a2e}
+.modal-close{background:none;border:none;font-size:22px;color:#888;cursor:pointer;line-height:1}
+.modal-close:hover{color:var(--red)}
+.modal-body{padding:15px 17px}
+.modal-body label{display:block;font-size:12px;color:#666;margin-bottom:5px}
+.modal-body input[type=text],.modal-body textarea{width:100%;border:1px solid #ddd;border-radius:6px;padding:8px 9px;font-size:13px;outline:none;background:#fff;color:var(--text)}
+.modal-body input[type=text]:focus,.modal-body textarea:focus{border-color:var(--blue)}
+.modal-body textarea{min-height:300px;font-family:Consolas,monospace;font-size:12px;resize:vertical}
+.modal-foot{padding:11px 17px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+.modal-foot button{padding:8px 17px;font-size:13px}
+.confirm-msg{padding:18px 17px 8px;font-size:13px;line-height:1.7;white-space:pre-line}
+.confirm-msg .warn{color:var(--red);font-weight:600}
+.confirm-btns{padding:12px 17px 18px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.confirm-btns button{padding:8px 15px;font-size:12px}
+.danger-solid{background:var(--red);border-color:var(--red);color:#fff;font-weight:600}
+.danger-solid:hover{filter:brightness(1.08);color:#fff}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1a1a2e;color:#fff;padding:8px 16px;border-radius:6px;font-size:12px;opacity:0;pointer-events:none;transition:.2s;z-index:200}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="bar">
+<span style="font-weight:600;color:#1a1a2e">文件管理</span>
+<select id="rootSel" onchange="onRoot()"><option>加载中…</option></select>
+<button onclick="goUp()">↑ 上级</button>
+<button onclick="refresh()">刷新</button>
+<div class="spacer"></div>
+<button class="primary" onclick="askUpload()">↑ 上传文件</button>
+<button class="primary" onclick="askNewDir()">+ 新建文件夹</button>
+</div>
+<input type="file" id="upFile" style="display:none" onchange="doUpload(this.files[0])">
+<div class="progress-wrap" id="upProg">
+<div class="pt" id="upProgText">上传中…</div>
+<div class="pb"><i id="upProgBar"></i></div>
+</div>
+
+<div class="crumb" id="crumb"></div>
+
+<div class="list-card">
+<div class="tbl-scroll">
+<table>
+<thead><tr><th style="width:50%">名称</th><th>大小</th><th>修改时间</th><th style="text-align:right">操作</th></tr></thead>
+<tbody id="list"><tr><td colspan="4" class="empty">加载中…</td></tr></tbody>
+</table>
+</div>
+</div>
+</div>
+
+<!-- 通用确认 -->
+<div class="modal" id="confirmModal">
+<div class="modal-panel">
+<div class="modal-head"><b id="cfTitle">确认</b><button class="modal-close" onclick="closeConfirm()">×</button></div>
+<div class="confirm-msg" id="cfMsg"></div>
+<div class="confirm-btns" id="cfBtns"></div>
+</div>
+</div>
+<!-- 文本编辑 -->
+<div class="modal" id="editModal">
+<div class="modal-panel">
+<div class="modal-head"><b id="edTitle">编辑文件</b><button class="modal-close" onclick="closeEdit()">×</button></div>
+<div class="modal-body"><textarea id="edContent" spellcheck="false"></textarea></div>
+<div class="modal-foot"><button onclick="closeEdit()">取消</button><button class="primary" onclick="saveEdit()">保存</button></div>
+</div>
+</div>
+<div id="toast"></div>
+
+<script>
+var ROOT='/mnt/mmcblk0p4', CUR=ROOT, ROOTS=[];
+
+var WRITE_ACTIONS=['write','mkdir','rename','delete'];
+function api(params, body){
+  var q=[]; for(var k in params) if(k!=='content') q.push(encodeURIComponent(k)+'='+encodeURIComponent(params[k]));
+  var opt={cache:'no-store'};
+  var needPost=(body!==undefined)||(WRITE_ACTIONS.indexOf(params.action)>=0);
+  if(needPost){
+    opt.method='POST';
+    opt.headers={'Content-Type':'text/plain; charset=utf-8'};
+    opt.body=(body!==undefined)?body:'';
+  }
+  return fetch('/cgi-bin/filemgr.cgi?'+q.join('&'),opt)
+    .then(function(r){return r.json();})
+    .then(function(j){ if(!j.ok) throw new Error(j.err||'失败'); return j; });
+}
+function toast(msg){
+  var t=document.getElementById('toast'); t.textContent=msg; t.className='show';
+  clearTimeout(toast._t); toast._t=setTimeout(function(){t.className='';},1800);
+}
+function showConfirm(title,msg,buttons){
+  document.getElementById('cfTitle').textContent=title;
+  document.getElementById('cfMsg').innerHTML=msg;
+  var box=document.getElementById('cfBtns'); box.innerHTML='';
+  (buttons||[]).forEach(function(b){
+    var el=document.createElement('button'); el.textContent=b.label;
+    if(b.cls) el.className=b.cls;
+    el.onclick=function(){closeConfirm(); if(b.onClick)b.onClick();};
+    box.appendChild(el);
+  });
+  document.getElementById('confirmModal').className='modal show';
+}
+function closeConfirm(){document.getElementById('confirmModal').className='modal';}
+function closeEdit(){document.getElementById('editModal').className='modal';}
+document.addEventListener('keydown',function(e){ if(e.key==='Escape'){closeConfirm();closeEdit();} });
+
+function fmtSize(n){n=Number(n)||0;if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';if(n<1073741824)return (n/1048576).toFixed(1)+' MB';return (n/1073741824).toFixed(2)+' GB';}
+// 文本白名单：只有这些后缀 + 无后缀小文件才给「编辑」，其余按二进制处理
+var TEXT_EXT=['txt','conf','cfg','ini','sh','log','json','js','css','html','htm','xml','yaml','yml','md','py','lua','php','c','h','cpp','java','properties','env','list','awk','session'];
+function isTextFile(name){
+  var n=name.toLowerCase();
+  var ext=n.split('.').pop();
+  if(TEXT_EXT.indexOf(ext)>=0) return true;
+  if(n.indexOf('.')<0) return true;          // 无后缀（config 等）按文本试
+  if(n==='aria2') return false;              // aria2 控制文件是二进制
+  return false;
+}
+function fmtTime(ts){var d=new Date((Number(ts)||0)*1000);if(isNaN(d.getTime()))return '—';function p(n){return n<10?'0'+n:''+n;}return (d.getMonth()+1)+'/'+d.getDate()+' '+p(d.getHours())+':'+p(d.getMinutes());}
+function esc(s){return String(s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
+function loadRoots(){
+  fetch('/cgi-bin/file_dl.cgi?action=roots').then(function(r){return r.json();}).then(function(j){
+    ROOTS=j.roots||[];
+    var sel=document.getElementById('rootSel');
+    sel.innerHTML=ROOTS.map(function(r){
+      var avail=r.avail_kb?(' · 可用 '+fmtSize(r.avail_kb*1024)):'';
+      return '<option value="'+esc(r.path)+'">'+esc(r.name)+'（'+esc(r.fs)+avail+'）</option>';
+    }).join('');
+    if(ROOTS.length){ROOT=ROOTS[0].path;CUR=ROOT;sel.value=ROOT;refresh();}
+  }).catch(function(e){toast('根枚举失败：'+e.message);});
+}
+function onRoot(){ROOT=document.getElementById('rootSel').value;CUR=ROOT;refresh();}
+function goUp(){
+  if(CUR===ROOT){toast('已经是存储根');return;}
+  CUR=CUR.replace(/\/$/,'').split('/').slice(0,-1).join('/')||ROOT;
+  refresh();
+}
+function renderCrumb(){
+  var parts=CUR.split('/').filter(Boolean), cur='';
+  var html='<a onclick="onRoot()">'+(ROOTS.filter(function(r){return r.path===ROOT;})[0]||{}).name||esc(ROOT)+'</a>';
+  parts.forEach(function(p){
+    if(cur+'/'+p===ROOT) return;
+    cur=cur+'/'+p;
+    html+='<span class="sep">/</span><a onclick="goto(\''+esc(cur)+'\')">'+esc(p)+'</a>';
+  });
+  document.getElementById('crumb').innerHTML=html;
+}
+function goto(p){CUR=p;refresh();}
+
+function refresh(){
+  renderCrumb();
+  api({action:'list',path:CUR}).then(function(j){
+    var items=j.items||[];
+    items.sort(function(a,b){
+      if(a.type!==b.type) return a.type==='dir'?-1:1;
+      return a.name.localeCompare(b.name);
+    });
+    document.getElementById('list').innerHTML=items.length?items.map(function(it){
+      var isDir=it.type==='dir';
+      var editable=!isDir && isTextFile(it.name) && Number(it.size)<=1048576;
+      var clickAct=isDir?'goto':(editable?'edit':'dl');
+      var nm='<span class="fname '+it.type+'" title="'+esc(it.path)+'" onclick="'+clickAct+'(\''+esc(it.path).replace(/'/g,"\\'")+'\')">'
+            +'<span class="ico">'+(isDir?'📁':'📄')+'</span>'+esc(it.name)+'</span>';
+      var ops=isDir?'':'<button class="op-green" onclick="dl(\''+esc(it.path).replace(/'/g,"\\'")+'\')">下载</button>';
+      if(!isDir){
+        ops+='<button class="op-blue" onclick="renameAsk(\''+esc(it.path).replace(/'/g,"\\'")+'\',\''+esc(it.name).replace(/'/g,"\\'")+'\')">重命名</button>';
+        if(editable) ops+='<button class="op-blue" onclick="edit(\''+esc(it.path).replace(/'/g,"\\'")+'\')">编辑</button>';
+      } else {
+        ops+='<button class="op-blue" onclick="renameAsk(\''+esc(it.path).replace(/'/g,"\\'")+'\',\''+esc(it.name).replace(/'/g,"\\'")+'\')">重命名</button>';
+      }
+      ops+='<button class="op-red" onclick="deleteAsk(\''+esc(it.path).replace(/'/g,"\\'")+'\',\''+esc(it.name).replace(/'/g,"\\'")+'\',\''+it.type+'\')">删除</button>';
+      return '<tr><td>'+nm+'</td><td>'+(isDir?'<span class="muted">目录</span>':fmtSize(it.size))+'</td><td class="muted">'+fmtTime(it.mtime)+'</td><td class="ops">'+ops+'</td></tr>';
+    }).join(''):'<tr><td colspan="4" class="empty">目录为空</td></tr>';
+  }).catch(function(e){
+    document.getElementById('list').innerHTML='<tr><td colspan="4" class="empty">读取失败：'+esc(e.message)+'</td></tr>';
+  });
+}
+
+// 下载：复用统一下载链路
+function dl(path){
+  var a=document.createElement('a');
+  a.href='/cgi-bin/file_dl.cgi?path='+encodeURIComponent(path); a.download='';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  toast('已开始下载');
+}
+// 新建文件夹
+function askNewDir(){
+  showConfirm('新建文件夹','<label style="display:block;font-size:12px;color:#666;margin-bottom:6px">在当前目录下创建</label><input type="text" id="newName" placeholder="文件夹名" style="width:100%;border:1px solid #ddd;border-radius:6px;padding:8px">',[
+    {label:'取消'},{label:'创建',cls:'primary',onClick:function(){
+      var n=document.getElementById('newName')?document.getElementById('newName').value.trim():'';
+      if(!n){toast('请输入名称');return;}
+      if(n.indexOf('/')>=0||n==='.'||n==='..'){toast('名称不合法');return;}
+      api({action:'mkdir',path:CUR+'/'+n}).then(function(){toast('已创建');refresh();}).catch(function(e){toast('失败：'+e.message);});
+    }}
+  ]);
+  // 弹窗建好后聚焦输入框
+  setTimeout(function(){var el=document.getElementById('newName');if(el)el.focus();},50);
+}
+// 重命名
+function renameAsk(path,name){
+  showConfirm('重命名','<label style="display:block;font-size:12px;color:#666;margin-bottom:6px">新名称</label><input type="text" id="renName" value="'+esc(name)+'" style="width:100%;border:1px solid #ddd;border-radius:6px;padding:8px">',[
+    {label:'取消'},{label:'确认',cls:'primary',onClick:function(){
+      var el=document.getElementById('renName'); var n=el?el.value.trim():'';
+      if(!n||n.indexOf('/')>=0||n==='.'||n==='..'){toast('名称不合法');return;}
+      api({action:'rename',from:path,to:CUR+'/'+n}).then(function(){toast('已重命名');refresh();}).catch(function(e){toast('失败：'+e.message);});
+    }}
+  ]);
+  setTimeout(function(){var el=document.getElementById('renName');if(el){el.focus();el.select();}},50);
+}
+// 删除
+function deleteAsk(path,name,type){
+  var isDir=(type==='dir');
+  showConfirm('删除'+(isDir?'文件夹':'文件'),'名称：<b>'+esc(name)+'</b><br><br>'
+    +(isDir?'<span class="warn">删除文件夹仅支持空目录；非空请先删除内部文件。</span><br><br>':'')
+    +'<span class="warn">删除不可恢复，请确认。</span>',[
+    {label:'取消'},{label:'确认删除',cls:'danger-solid',onClick:function(){
+      api({action:'delete',path:path}).then(function(){toast('已删除');refresh();}).catch(function(e){toast('失败：'+e.message);});
+    }}
+  ]);
+}
+// 文本编辑
+function edit(path){
+  api({action:'read',path:path}).then(function(j){
+    document.getElementById('edTitle').textContent='编辑：'+path.split('/').pop();
+    document.getElementById('edContent').value=j.content||'';
+    document.getElementById('editModal')._path=path;
+    document.getElementById('editModal').className='modal show';
+  }).catch(function(e){toast('无法编辑：'+e.message);});
+}
+function saveEdit(){
+  var path=document.getElementById('editModal')._path;
+  var c=document.getElementById('edContent').value;
+  api({action:'write',path:path}, c).then(function(){closeEdit();toast('已保存');refresh();}).catch(function(e){toast('保存失败：'+e.message);});
+}
+
+// ===== 分片上传（POST 二进制，nginx lua 写盘；单片 4MB）=====
+var CHUNK = 4*1024*1024;
+function askUpload(){
+  var inp=document.getElementById('upFile'); inp.value=''; inp.click();
+}
+function doUpload(file){
+  if(!file) return;
+  var target=CUR+'/'+file.name;
+  // 目标已存在 -> 网页确认覆盖
+  var proceed=function(){
+    var total=file.size, sent=0, chunkIdx=0;
+    var pw=document.getElementById('upProg');
+    pw.className='progress-wrap show';
+    function update(){
+      var pct=total?(sent/total*100):100;
+      document.getElementById('upProgBar').style.width=pct.toFixed(1)+'%';
+      document.getElementById('upProgText').textContent='上传 '+file.name+' · '+fmtSize(sent)+' / '+fmtSize(total)+'（'+pct.toFixed(0)+'%）';
+    }
+    function next(){
+      // total=0（空文件）时也要发一次空 POST 创建文件，用 chunkIdx 保证只发一次
+      if(sent>=total && (total>0 || chunkIdx>0)){
+        pw.className='progress-wrap';
+        toast('上传完成：'+file.name);
+        refresh(); return;
+      }
+      var end=Math.min(sent+CHUNK,total);
+      var slice=file.slice(sent,end);
+      var append=(chunkIdx>0)?'1':'0';
+      fetch('/fm_upload?path='+encodeURIComponent(target)+'&append='+append,{
+        method:'POST', headers:{'Content-Type':'application/octet-stream'}, body:slice
+      }).then(function(r){return r.json();}).then(function(j){
+        if(!j.ok) throw new Error(j.err||'上传失败');
+        sent=end; chunkIdx++; update(); next();
+      }).catch(function(e){
+        pw.className='progress-wrap';
+        toast('上传失败：'+e.message);
+      });
+    }
+    update(); next();
+  };
+  // 检查是否已存在
+  api({action:'list',path:CUR}).then(function(j){
+    var exists=(j.items||[]).some(function(it){return it.name===file.name;});
+    if(exists){
+      showConfirm('覆盖文件','文件 <b>'+esc(file.name)+'</b> 已存在。<br><br><span class="warn">上传将覆盖原文件，不可恢复。</span>',[
+        {label:'取消'},{label:'确认覆盖',cls:'danger-solid',onClick:proceed}
+      ]);
+    } else proceed();
+  }).catch(function(){ proceed(); });
+}
+
+loadRoots();
+</script>
+</body>
+</html>

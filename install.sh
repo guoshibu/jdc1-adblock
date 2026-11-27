@@ -13,7 +13,8 @@
 #   2. 部署 web/main_patched.html → /www/PC/main.html（注入「去广告」菜单，自动备份原文件）
 #   3. 写入开机自启（rc.local）与每日定时更新（cron），均幂等
 #   4. 配置 nginx /AD 短链接（幂等，自动 nginx -t 校验）
-#   5. 对每个部署文件做 md5 校验
+#   5. 部署离线下载（aria2）与文件管理：恢复下载器、页面/API、nginx location、符号链接
+#   6. 对每个部署文件做 md5 校验
 # ============================================================
 
 set -u
@@ -42,11 +43,11 @@ log "==============================================="
 
 # --- 1. 部署脚本文件 ---
 log ""
-log "--- [1/5] 部署脚本文件 ---"
+log "--- [1/6] 部署脚本文件 ---"
 
 # CGI → /www/cgi-bin/
 mkdir -p /www/cgi-bin
-for cgi in adblock.cgi adblock_status.cgi; do
+for cgi in adblock.cgi adblock_status.cgi filemgr.cgi file_dl.cgi; do
     if [ -f "$SCRIPTS_DIR/$cgi" ]; then
         cp "$SCRIPTS_DIR/$cgi" "/www/cgi-bin/$cgi"
         chmod 755 "/www/cgi-bin/$cgi"
@@ -77,7 +78,7 @@ fi
 
 # --- 2. 部署菜单入口 ---
 log ""
-log "--- [2/5] 部署 Web 菜单入口 ---"
+log "--- [2/6] 部署 Web 菜单入口 ---"
 if [ -f "$WEB_DIR/main_patched.html" ]; then
     if [ -f /www/PC/main.html ]; then
         # 备份原文件（只备份一次）
@@ -96,7 +97,7 @@ fi
 
 # --- 3. 开机自启 + 定时更新（幂等 + 自愈）---
 log ""
-log "--- [3/5] 配置开机自启与定时更新 ---"
+log "--- [3/6] 配置开机自启与定时更新 ---"
 
 # 自愈式写入：精确匹配「正确行」，不存在则先删旧的相关行再插入正确行
 # 这样既能避免重复（幂等），又能修正之前写错的旧配置（自愈）
@@ -149,7 +150,7 @@ fi
 
 # --- 4. nginx /AD 短链接（幂等 + 自愈）---
 log ""
-log "--- [4/5] 配置 /AD 短链接 ---"
+log "--- [4/6] 配置 /AD 短链接 ---"
 NGINX_CONF="/etc/nginx/conf.d/jdc-web.conf"
 if [ -f "$NGINX_CONF" ]; then
     if grep -Fq 'location ~* ^/AD$' "$NGINX_CONF" 2>/dev/null; then
@@ -184,11 +185,122 @@ else
     log "  ${Y}跳过${N} $NGINX_CONF 不存在"
 fi
 
-# --- 5. md5 校验（列出已部署文件，供人工核对）---
+# --- 5. 离线下载（aria2）+ 文件管理（幂等）---
 log ""
-log "--- [5/5] 部署完成，文件清单 ---"
+log "--- [5/6] 部署离线下载与文件管理 ---"
+
+# 5.1 恢复原厂 aria2 下载器（官改固件把 /sbin/downloader 等用 whiteout 屏蔽了）
+#     从 /rom（只读 squashfs 原厂分区）复制到 overlay 上层，重启后持久
+for f in downloader rpcwrapper; do
+    if [ ! -f "/sbin/$f" ] && [ -f "/rom/sbin/$f" ]; then
+        rm -f "/overlay/upper/sbin/$f" 2>/dev/null
+        cp "/rom/sbin/$f" "/sbin/$f" && chmod 755 "/sbin/$f" \
+            && log "  ${G}✓${N} 恢复 /sbin/$f" \
+            || log "  ${Y}跳过${N} /sbin/$f 恢复失败"
+    else
+        log "  ${Y}已存在${N} /sbin/$f"
+    fi
+done
+if [ ! -f /etc/init.d/downloader ] && [ -f /rom/etc/init.d/downloader ]; then
+    rm -f /overlay/upper/etc/init.d/downloader 2>/dev/null
+    cp /rom/etc/init.d/downloader /etc/init.d/downloader && chmod 755 /etc/init.d/downloader \
+        && log "  ${G}✓${N} 恢复 /etc/init.d/downloader" \
+        || log "  ${Y}跳过${N} init.d/downloader 恢复失败"
+else
+    log "  ${Y}已存在${N} /etc/init.d/downloader"
+fi
+# 下载器配置（aria2 RPC 6800 + token + 保存到内置盘）
+if [ -f "$SCRIPTS_DIR/downloader.conf" ]; then
+    rm -f /overlay/upper/etc/downloader.conf 2>/dev/null
+    cp "$SCRIPTS_DIR/downloader.conf" /etc/downloader.conf && chmod 644 /etc/downloader.conf \
+        && log "  ${G}✓${N} downloader.conf → /etc/downloader.conf"
+fi
+
+# 5.2 页面与后端文件
+#     HTML → /www/，Lua → /www/，CGI 已在步骤 1 部署
+[ -f "$SCRIPTS_DIR/download_web.html" ] && cp "$SCRIPTS_DIR/download_web.html" /www/dl.html \
+    && chmod 644 /www/dl.html && log "  ${G}✓${N} download_web.html → /www/dl.html"
+[ -f "$SCRIPTS_DIR/filemgr.html" ] && cp "$SCRIPTS_DIR/filemgr.html" /www/filemgr.html \
+    && chmod 644 /www/filemgr.html && log "  ${G}✓${N} filemgr.html → /www/filemgr.html"
+[ -f "$SCRIPTS_DIR/fm_upload.lua" ] && cp "$SCRIPTS_DIR/fm_upload.lua" /www/fm_upload.lua \
+    && chmod 644 /www/fm_upload.lua && log "  ${G}✓${N} fm_upload.lua → /www/fm_upload.lua"
+
+# 5.3 静态下载符号链接（/dl-mnt → /mnt，nginx sendfile 直传 + Range 断点续传）
+if [ ! -L /www/dl-mnt ]; then
+    ln -sfn /mnt /www/dl-mnt && log "  ${G}✓${N} 建立 /www/dl-mnt → /mnt"
+else
+    log "  ${Y}已存在${N} /www/dl-mnt"
+fi
+
+# 5.4 nginx：上传端点 + 静态下载白名单防绕过（幂等）
+NGINX_CONF="/etc/nginx/conf.d/jdc-web.conf"
+if [ -f "$NGINX_CONF" ]; then
+    CHANGED=0
+    if ! grep -Fq 'location /fm_upload' "$NGINX_CONF"; then
+        # 在最后一个 } 前插入（awk 兼容 busybox）
+        awk '
+            { lines[NR]=$0 }
+            END{
+                for(i=1;i<=NR;i++){
+                    if(lines[i] ~ /^}/ && !done){
+                        print "\tlocation /fm_upload {"
+                        print "\t\tdefault_type application/json;"
+                        print "\t\tclient_max_body_size 8m;"
+                        print "\t\tcontent_by_lua_file '\''/www/fm_upload.lua'\'';"
+                        print "\t}"
+                        done=1
+                    }
+                    print lines[i]
+                }
+            }
+        ' "$NGINX_CONF" > /tmp/jdc-web.dl.new && cp /tmp/jdc-web.dl.new "$NGINX_CONF" && rm -f /tmp/jdc-web.dl.new
+        CHANGED=1
+        log "  ${G}✓${N} nginx 上传端点 /fm_upload 已配置"
+    else
+        log "  ${Y}已存在${N} nginx 上传端点"
+    fi
+    # 静态链接安全规则：只允许 mmcblk0p4 与 sdX 前缀，防止绕过 CGI 白名单读其他分区
+    if ! grep -Fq 'dl-mnt/(?!mmcblk0p4' "$NGINX_CONF"; then
+        awk '
+            /location \/cgi-bin/ && !done {
+                print "\tlocation ~ ^/dl-mnt/(?!mmcblk0p4/|sd[a-z][0-9]*/) { return 403; }"
+                done=1
+            }
+            { print }
+        ' "$NGINX_CONF" > /tmp/jdc-web.dl2.new && cp /tmp/jdc-web.dl2.new "$NGINX_CONF" && rm -f /tmp/jdc-web.dl2.new
+        CHANGED=1
+        log "  ${G}✓${N} nginx 静态下载白名单规则已配置"
+    else
+        log "  ${Y}已存在${N} nginx 静态下载白名单规则"
+    fi
+    if [ "$CHANGED" -eq 1 ]; then
+        if nginx -t 2>/tmp/nginx_dl.err; then
+            nginx -s reload 2>/dev/null && log "  ${G}✓${N} nginx 已重载"
+        else
+            fail "nginx 配置校验失败（下载功能可能不可用）"
+            cat /tmp/nginx_dl.err 2>/dev/null | grep -v lua_code_cache
+        fi
+    fi
+else
+    log "  ${Y}跳过${N} $NGINX_CONF 不存在"
+fi
+
+# 5.5 启动下载器并设为开机自启
+if [ -f /etc/init.d/downloader ]; then
+    /etc/init.d/downloader enable 2>/dev/null
+    /etc/init.d/downloader start 2>/dev/null
+    if netstat -lnt 2>/dev/null | grep -q ':6800'; then
+        log "  ${G}✓${N} 下载器已启动（RPC 6800）"
+    else
+        log "  ${Y}提示${N} 下载器未监听 6800，请检查 /etc/init.d/downloader status"
+    fi
+fi
+
+# --- 6. md5 校验（列出已部署文件，供人工核对）---
+log ""
+log "--- [6/6] 部署完成，文件清单 ---"
 log "已部署文件（可手动 md5sum 核对）："
-for f in /www/cgi-bin/adblock.cgi /www/cgi-bin/adblock_status.cgi /usr/bin/proc_monitor.sh /usr/bin/adblock_update.sh /usr/bin/adblock_rebuild_sources.sh /usr/bin/adguard_install.sh /etc/adblock/sources.list; do
+for f in /www/cgi-bin/adblock.cgi /www/cgi-bin/adblock_status.cgi /www/cgi-bin/filemgr.cgi /www/cgi-bin/file_dl.cgi /www/dl.html /www/filemgr.html /www/fm_upload.lua /etc/downloader.conf /usr/bin/proc_monitor.sh /usr/bin/adblock_update.sh /usr/bin/adblock_rebuild_sources.sh /usr/bin/adguard_install.sh /etc/adblock/sources.list; do
     [ -f "$f" ] && log "  $(md5sum "$f" 2>/dev/null | cut -d' ' -f1)  $f"
 done
 
@@ -207,6 +319,9 @@ log "       reboot"
 log ""
 log "重启后访问：http://路由器IP/AD  （或 /cgi-bin/adblock.cgi）"
 log "AGH 控制台：http://路由器IP:3000"
+log "去广告页「系统状态」里的两个 stat 可打开：离线下载 / 文件管理"
+log "  下载管理页：http://路由器IP/dl.html"
+log "  文件管理页：http://路由器IP/filemgr.html"
 log ""
 log "⚠️  AGH 默认密码 admin / password123!，首次登录后务必修改！"
 log "==============================================="

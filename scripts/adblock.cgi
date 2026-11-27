@@ -424,6 +424,20 @@ input[type=checkbox]{transform:scale(1.15);margin-right:6px}
 .badge.on{background:#dcfce7;color:#16a34a}
 .badge.off{background:#fee2e2;color:#dc2626}
 .badge.mid{background:#fef3c7;color:#d97706}
+/* 离线下载 stat + 弹窗 */
+.dl-stat{cursor:pointer;transition:background .15s,box-shadow .15s}
+.dl-stat:hover{background:#eff6ff;box-shadow:0 0 0 1px #bfdbfe}
+.dl-stat .label{color:#2563eb}
+.dl-open{background:#2563eb;color:#fff;border:none;padding:9px 18px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer}
+.dl-open:hover{background:#1d4ed8}
+#dlModal,#fmModal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.55);display:none;z-index:1000;align-items:center;justify-content:center}
+#dlModal.show,#fmModal.show{display:flex}
+.dl-panel{background:#fff;border-radius:10px;width:min(980px,94vw);height:min(720px,90vh);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.3)}
+.dl-head{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid #e5e7eb;flex:none}
+.dl-head b{font-size:16px;color:#1a1a2e}
+.dl-close{background:none;border:none;font-size:22px;line-height:1;color:#888;cursor:pointer;padding:0 4px}
+.dl-close:hover{color:#dc2626}
+.dl-panel iframe{flex:1;border:none;width:100%;height:100%}
 </style>
 </head>
 <body>
@@ -467,14 +481,22 @@ input[type=checkbox]{transform:scale(1.15);margin-right:6px}
   </div>
   <div class="bar"><div class="bar-fill bar-fill-swap" id="swapBar" style="width:${SWAP_PCT}%"></div></div>
 </div>
-<div class="stat" title="系统平均负载（load average），分别是 1分钟/5分钟/15分钟 的平均值。含义是平均有多少进程在等待 CPU。本机 4 线程，负载 ≈4 表示刚好满载，>4 表示过载。">
-  <div class="label">负载（1/5/15分钟）</div>
+<div class="stat" title="负载（1/5/15分钟）是等待 CPU 的平均进程数，本机 4 线程，负载 ≈4 表示满载。运行时间是路由器自开机以来的时长。">
+  <div class="label">负载 / 运行时间</div>
   <div class="value" style="font-size:14px" id="loadVal">${LOAD}</div>
   <div class="sub" id="loadRate">负载率 -%</div>
+  <div class="sub" style="margin-top:6px" id="uptimeVal">${UPTIME_TXT}</div>
 </div>
-<div class="stat" title="路由器自开机以来连续运行的时间。">
-  <div class="label">运行时间</div>
-  <div class="value" style="font-size:14px" id="uptimeVal">${UPTIME_TXT}</div>
+<div class="stat dl-stat" onclick="openDl()" title="点击打开下载管理（添加链接 / 种子、暂停、删除）">
+  <div class="label">离线下载 · 点击打开 →</div>
+  <div class="value" id="dlState" style="font-size:15px">检测中…</div>
+  <div class="sub" id="dlDown">—</div>
+  <div class="sub" id="dlActive">—</div>
+</div>
+<div class="stat dl-stat" onclick="openFm()" title="点击打开文件管理（内置盘 / U盘，增删改查）">
+  <div class="label">文件管理 · 点击打开 →</div>
+  <div class="value" style="font-size:14px">内置盘 + U盘</div>
+  <div class="sub" id="fmDisk">读取中…</div>
 </div>
 </div>
 
@@ -824,6 +846,8 @@ function refresh(){
         PROC_DATA = d.procs;
         renderProcs();
       }
+      // 离线下载状态（独立探测，失败不影响其他卡片）
+      dlStat();
       // 刷新信息
       var t = new Date();
       document.getElementById("refreshInfo").textContent = "上次刷新 " + t.toLocaleTimeString();
@@ -832,6 +856,76 @@ function refresh(){
       document.getElementById("refreshInfo").textContent = "刷新失败";
     });
 }
+
+// ============ 离线下载卡片 + 弹窗 ============
+function fmtRate(n){
+  n = Number(n)||0;
+  if(n <= 0) return "—";
+  if(n < 1048576) return (n/1024).toFixed(0) + " KB/s";
+  return (n/1048576).toFixed(1) + " MB/s";
+}
+function dlVersion(){
+  var rpc = "http://" + location.hostname + ":6800/jsonrpc";
+  fetch(rpc, {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({jsonrpc:"2.0",id:"v1",method:"aria2.getVersion",params:["token:jdc2026"]})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(j){ if(j.result) document.getElementById("dlVer").textContent = "· aria2 " + j.result.version; })
+  .catch(function(){});
+}
+function dlStat(){
+  var rpc = "http://" + location.hostname + ":6800/jsonrpc";
+  fetch(rpc, {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({jsonrpc:"2.0",id:"1",method:"aria2.getGlobalStat",params:["token:jdc2026"]})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(j){
+    if(j.error) throw new Error(j.error.message);
+    var d = j.result;
+    var st = document.getElementById("dlState");
+    st.textContent = "运行中"; st.className = "value on";
+    document.getElementById("dlDown").textContent = fmtRate(d.downloadSpeed);
+    document.getElementById("dlActive").textContent = "进行 " + d.numActive + " · 等待 " + d.numWaiting;
+  })
+  .catch(function(e){
+    var st = document.getElementById("dlState");
+    st.textContent = "未启动"; st.className = "value off";
+    document.getElementById("dlDown").textContent = "—";
+    document.getElementById("dlActive").textContent = "—";
+  });
+}
+function openDl(){
+  var m = document.getElementById("dlModal");
+  var f = document.getElementById("dlFrame");
+  if(!f.src || f.src === "about:blank") f.src = "/dl.html";   // 首次点击才加载
+  m.className = "show";
+  document.body.style.overflow = "hidden";
+}
+function closeDl(){
+  document.getElementById("dlModal").className = "";
+  document.body.style.overflow = "";
+}
+function openFm(){
+  var m = document.getElementById("fmModal");
+  var f = document.getElementById("fmFrame");
+  if(!f.src || f.src === "about:blank") f.src = "/filemgr.html";
+  m.className = "show";
+  document.body.style.overflow = "hidden";
+}
+function closeFm(){
+  document.getElementById("fmModal").className = "";
+  document.body.style.overflow = "";
+}
+function fmInfo(){
+  fetch("/cgi-bin/file_dl.cgi?action=roots").then(function(r){return r.json();}).then(function(j){
+    var rs=j.roots||[];
+    var usb=rs.filter(function(r){return r.path.match(/\/mnt\/sd[a-z]/);});
+    document.getElementById("fmDisk").textContent = rs.length + " 个盘" + (usb.length?(" · U盘 "+usb[0].name):" · 无U盘");
+  }).catch(function(){ document.getElementById("fmDisk").textContent = "—"; });
+}
+document.addEventListener("keydown", function(e){ if(e.key === "Escape"){ closeDl(); closeFm(); } });
 
 function setRate(){
   REFRESH_RATE = parseInt(document.getElementById("refreshRate").value);
@@ -917,10 +1011,26 @@ function initColResize(){
 
 // 启动自动刷新（默认 5 秒）
 refresh();
+dlVersion();
+fmInfo();
 setRate();
 toggleCustom();
 initColResize();
 </script>
+
+<div id="dlModal" onclick="if(event.target===this)closeDl()">
+<div class="dl-panel">
+<div class="dl-head"><b>离线下载管理 <small id="dlVer" style="font-size:11px;color:#888;font-weight:400"></small></b><button class="dl-close" onclick="closeDl()" title="关闭">×</button></div>
+<iframe id="dlFrame" src="about:blank" title="离线下载"></iframe>
+</div>
+</div>
+
+<div id="fmModal" onclick="if(event.target===this)closeFm()">
+<div class="dl-panel">
+<div class="dl-head"><b>文件管理 <small style="font-size:11px;color:#888;font-weight:400">· 内置盘 / U盘</small></b><button class="dl-close" onclick="closeFm()" title="关闭">×</button></div>
+<iframe id="fmFrame" src="about:blank" title="文件管理"></iframe>
+</div>
+</div>
 </body>
 </html>
 HTML

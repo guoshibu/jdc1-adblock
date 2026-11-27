@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JDC 下载管理</title>
+<style>
+:root{--bg:#f5f6f8;--panel:#fff;--panel2:#f8f9fb;--line:#e5e7eb;--text:#333;--muted:#888;--blue:#2563eb;--green:#16a34a;--orange:#d97706;--red:#dc2626}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;display:flex;flex-direction:column}
+.wrap{max-width:1240px;width:100%;margin:0 auto;padding:12px 14px;display:flex;flex-direction:column;flex:1;min-height:0;gap:10px}
+.head{display:flex;align-items:center;justify-content:space-between;flex:none}
+.head h1{font-size:17px;margin:0;color:#1a1a2e}
+.head h1 span{color:var(--blue)}
+.head .sub{color:var(--muted);font-size:11px;margin-top:1px}
+.toolbar{background:var(--panel);border-radius:9px;padding:9px 12px;box-shadow:0 1px 3px rgba(0,0,0,.06);display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:none}
+.metric{display:flex;flex-direction:column;min-width:70px;padding:0 9px;border-right:1px solid var(--line)}
+.metric:first-child{border-left:none}
+.metric b{font-size:15px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.metric small{font-size:10px;color:var(--muted)}
+.metric.dn b{color:var(--green)} .metric.up b{color:var(--orange)}
+.toolbar .spacer{flex:1}
+button{background:#fff;border:1px solid #ddd;color:var(--text);border-radius:5px;padding:6px 10px;font-size:12px;cursor:pointer;transition:.15s}
+button:hover{border-color:var(--blue);color:var(--blue)}
+button.primary{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600}
+button.primary:hover{filter:brightness(1.08);color:#fff}
+button.danger:hover{border-color:var(--red);color:var(--red)}
+button.add{font-size:12px;padding:7px 14px}
+.filters{background:var(--panel);border-radius:8px;padding:7px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:none;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.tabs button{padding:4px 10px;font-size:11px;border-radius:14px}
+.tabs button.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.filters input[type=text]{border:1px solid #ddd;border-radius:5px;padding:5px 9px;font-size:12px;outline:none;width:180px}
+.filters input[type=text]:focus{border-color:var(--blue)}
+.filters .spacer{flex:1}
+.filters small{color:var(--muted);font-size:11px}
+.batchbar{background:#eff6ff;border:1px solid #bfdbfe;border-radius:7px;padding:6px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:none;font-size:11px;color:#1d4ed8}
+.batchbar label{display:flex;align-items:center;gap:4px;cursor:pointer;font-weight:600}
+.batchbar .spacer{flex:1}
+.batchbar button{padding:4px 9px;font-size:11px}
+td.sel,th.sel{width:26px;text-align:center}
+input[type=checkbox]{cursor:pointer;transform:scale(1.05)}
+.date{color:var(--muted);font-size:10px;white-space:nowrap}
+.list-card{background:var(--panel);border-radius:9px;box-shadow:0 1px 3px rgba(0,0,0,.06);flex:1;min-height:160px;display:flex;flex-direction:column;overflow:hidden}
+.tbl-scroll{overflow:auto;flex:1;min-height:0}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;color:var(--muted);font-size:11px;font-weight:600;padding:8px 9px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);z-index:1;white-space:nowrap}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--blue)}
+th .arw{color:var(--blue);font-size:10px}
+td{padding:8px 9px;border-bottom:1px solid #f0f0f0;vertical-align:middle}
+tr:hover td{background:#f8fafc}
+.name{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.path{color:var(--muted);font-size:10px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prog{width:100%;height:4px;background:#e5e7eb;border-radius:2px;overflow:hidden;margin-top:4px}
+.prog i{display:block;height:100%;background:var(--blue);border-radius:2px}
+.prog i.done{background:var(--green)}
+.badge{display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:600;white-space:nowrap}
+.st-active{background:#dcfce7;color:#16a34a}
+.st-waiting{background:#fef3c7;color:#b45309}
+.st-paused{background:#f1f5f9;color:#64748b}
+.st-complete{background:#dbeafe;color:#1d4ed8}
+.st-error{background:#fee2e2;color:#dc2626}
+.st-removed{background:#f1f5f9;color:#94a3b8}
+.ops{white-space:nowrap;text-align:right}
+.ops button{padding:3px 7px;font-size:10px;margin-left:3px;border-radius:4px;font-weight:600}
+.op-blue{border-color:#bfdbfe;color:#1d4ed8;background:#eff6ff}
+.op-blue:hover{border-color:var(--blue);color:var(--blue)}
+.op-green{border-color:#bbf7d0;color:#15803d;background:#f0fdf4}
+.op-green:hover{border-color:var(--green);color:var(--green)}
+.op-red{border-color:#fecaca;color:#b91c1c;background:#fef2f2}
+.op-red:hover{border-color:var(--red);color:var(--red)}
+.op-gray{border-color:#e2e8f0;color:#475569;background:#f8fafc}
+.op-gray:hover{border-color:#64748b;color:#475569}
+.empty{text-align:center;color:var(--muted);padding:34px 0}
+.statusbar{background:var(--panel);border-radius:8px;padding:7px 12px;box-shadow:0 1px 3px rgba(0,0,0,.06);display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none;font-size:11px;color:var(--muted)}
+.statusbar code{background:var(--panel2);padding:1px 5px;border-radius:3px}
+.statusbar button.copybtn{background:var(--panel2);padding:2px 7px;font-size:11px;color:var(--blue);font-family:Consolas,monospace}
+#err{display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:11px 13px;flex:none;font-size:12px;color:#991b1b}
+#err .etitle{font-weight:700;font-size:13px;margin-bottom:6px}
+#err .emsg{font-family:Consolas,monospace;font-size:11px;background:#fff;border-radius:4px;padding:5px 8px;margin-bottom:8px;word-break:break-all}
+#err ol{margin:6px 0 8px;padding-left:20px;line-height:1.7}
+#err code{background:#fff;border:1px solid #fecaca;border-radius:3px;padding:1px 5px;font-family:Consolas,monospace;color:#b91c1c;cursor:pointer}
+#err code:hover{background:#fff1f1}
+#err .ebtn{padding:5px 12px;font-size:11px;margin-top:4px}
+/* 新建任务弹窗 */
+#newModal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);display:none;z-index:100;align-items:center;justify-content:center}
+#newModal.show{display:flex}
+.modal-panel{background:#fff;border-radius:10px;width:min(640px,92vw);max-height:92vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.3)}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:12px 17px;border-bottom:1px solid var(--line)}
+.modal-head b{font-size:15px;color:#1a1a2e}
+.modal-close{background:none;border:none;font-size:22px;color:#888;cursor:pointer;line-height:1}
+.modal-close:hover{color:var(--red)}
+.modal-body{padding:14px 17px}
+.modal-body label{display:block;font-size:12px;color:#666;margin:0 0 5px}
+.modal-body label .live{font-size:10px;color:var(--green);font-weight:400}
+.modal-body textarea,.modal-body select,.modal-body input[type=text]{width:100%;border:1px solid #ddd;border-radius:6px;padding:8px 9px;font-size:13px;font-family:inherit;outline:none;background:#fff;color:var(--text);margin-bottom:12px}
+.modal-body textarea:focus,.modal-body select:focus,.modal-body input[type=text]:focus{border-color:var(--blue)}
+.modal-body textarea{min-height:84px;resize:vertical;font-family:Consolas,monospace;font-size:12px}
+.modal-body input[type=file]{font-size:12px;margin-bottom:12px}
+.modal-foot{padding:11px 17px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:8px}
+.modal-foot .pathinfo{font-size:11px;color:var(--muted)}
+.modal-foot .btns{display:flex;gap:8px}
+.modal-foot button{padding:8px 17px;font-size:13px}
+/* 通用确认弹窗 + 详情弹窗 */
+.modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);display:none;z-index:150;align-items:center;justify-content:center}
+.modal.show{display:flex}
+.modal .modal-panel{width:min(460px,92vw)}
+#detailModal .modal-panel{width:min(560px,92vw)}
+#detailBody{padding:14px 17px;font:12px/1.8 Consolas,monospace;color:#333;white-space:pre-wrap;word-break:break-all;background:#f8f9fb;border-radius:6px;margin:14px 17px;max-height:56vh;overflow:auto}
+.confirm-msg{padding:18px 17px 8px;font-size:13px;line-height:1.7;color:#333;white-space:pre-line}
+.confirm-msg .warn{color:var(--red);font-weight:600}
+.confirm-btns{padding:12px 17px 18px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.confirm-btns button{padding:8px 15px;font-size:12px}
+.confirm-btns .danger-solid{background:var(--red);border-color:var(--red);color:#fff;font-weight:600}
+.confirm-btns .danger-solid:hover{filter:brightness(1.08);color:#fff}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1a1a2e;color:#fff;padding:8px 16px;border-radius:6px;font-size:12px;opacity:0;pointer-events:none;transition:.2s;z-index:200}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div id="err"></div>
+
+<div class="toolbar">
+<div class="metric dn"><b id="s-dl">0</b><small>下载速度</small></div>
+<div class="metric up"><b id="s-ul">0</b><small>上传速度</small></div>
+<div class="metric"><b id="s-active">0</b><small>进行中</small></div>
+<div class="metric"><b id="s-wait">0</b><small>等待中</small></div>
+<div class="metric"><b id="s-stop">0</b><small>已完成</small></div>
+<div class="spacer"></div>
+<button onclick="bulk('forcePauseAll')">全部暂停</button>
+<button onclick="bulk('unpauseAll')">全部继续</button>
+<button class="danger" onclick="purge()">清除记录</button>
+<button class="primary add" onclick="openNew()">+ 新建任务</button>
+</div>
+
+<div class="filters">
+<div class="tabs">
+<button class="on" data-f="all" onclick="setFilter('all',this)">全部</button>
+<button data-f="active" onclick="setFilter('active',this)">下载中</button>
+<button data-f="waiting" onclick="setFilter('waiting',this)">等待</button>
+<button data-f="paused" onclick="setFilter('paused',this)">已暂停</button>
+<button data-f="complete" onclick="setFilter('complete',this)">已完成</button>
+<button data-f="error" onclick="setFilter('error',this)">错误</button>
+</div>
+<input type="text" id="search" placeholder="搜索文件名…" oninput="render()">
+<div class="spacer"></div>
+<small id="cnt"></small>
+</div>
+
+<div class="batchbar" id="batchbar">
+<label><input type="checkbox" id="selAll" onchange="toggleAll(this)"> 全选</label>
+<span id="selInfo">已选 0 个</span>
+<div class="spacer"></div>
+<button onclick="batchAct('forcePause')">暂停</button>
+<button onclick="batchAct('unpause')">继续</button>
+<button onclick="batchAct('remove')">移除任务</button>
+<button class="danger" onclick="batchAct('forceRemove')">删除任务+文件</button>
+<button class="danger" onclick="batchAct('removeDownloadResult')">清除记录</button>
+</div>
+
+<div class="list-card">
+<div class="tbl-scroll">
+<table>
+<thead><tr>
+<th style="width:26px"><input type="checkbox" id="selAll2" onchange="toggleAll(this)"></th>
+<th class="sortable" style="width:34%" onclick="setSort('name')">任务 <span class="arw" id="ar-name"></span></th>
+<th class="sortable" onclick="setSort('size')">大小 <span class="arw" id="ar-size"></span></th>
+<th class="sortable" onclick="setSort('progress')">进度 <span class="arw" id="ar-progress"></span></th>
+<th class="sortable" onclick="setSort('down')">下载速度 <span class="arw" id="ar-down"></span></th>
+<th class="sortable" onclick="setSort('eta')">剩余时间 <span class="arw" id="ar-eta"></span></th>
+<th class="sortable" onclick="setSort('date')">添加时间 <span class="arw" id="ar-date"></span></th>
+<th>状态</th>
+<th style="text-align:right">操作</th>
+</tr></thead>
+<tbody id="list"><tr><td colspan="9" class="empty">加载中…</td></tr></tbody>
+</table>
+</div>
+</div>
+
+<div class="statusbar">
+<span>aria2 当前目录 <code id="curdir">读取中…</code></span>
+<span>·</span>
+<span>RPC <code id="ep">http://192.168.68.1:6800/jsonrpc</code>（仅 POST）</span>
+<span>·</span>
+<span>token <button class="copybtn" onclick="copyToken()" title="点击复制">jdc2026</button></span>
+</div>
+</div>
+
+<div id="newModal" onclick="if(event.target===this)closeNew()">
+<div class="modal-panel">
+<div class="modal-head"><b>新建下载任务</b><button class="modal-close" onclick="closeNew()">×</button></div>
+<div class="modal-body">
+<label>下载链接（每行一个，支持 http / https / magnet:）</label>
+<textarea id="urls" placeholder="https://example.com/file.zip&#10;magnet:?xt=urn:btih:..."></textarea>
+<label>保存位置 <span class="live" id="dirLive">（实时读取 aria2 配置中…）</span></label>
+<select id="dir"><option value="">读取中…</option></select>
+<input type="text" id="dirCustom" placeholder="也可直接输入自定义路径（留空则用上面的选择）">
+<label>或上传 .torrent 种子文件</label>
+<input type="file" id="torrent" accept=".torrent">
+</div>
+<div class="modal-foot">
+<span class="pathinfo" id="pathInfo"></span>
+<div class="btns"><button onclick="closeNew()">取消</button><button class="primary" onclick="addAll()">开始下载</button></div>
+</div>
+</div>
+</div>
+
+<!-- 通用确认弹窗 -->
+<div class="modal" id="confirmModal">
+<div class="modal-panel">
+<div class="modal-head"><b id="cfTitle">确认操作</b><button class="modal-close" onclick="closeConfirm()">×</button></div>
+<div class="confirm-msg" id="cfMsg"></div>
+<div class="confirm-btns" id="cfBtns"></div>
+</div>
+</div>
+
+<!-- 详情弹窗 -->
+<div class="modal" id="detailModal" onclick="if(event.target===this)closeDetail()">
+<div class="modal-panel">
+<div class="modal-head"><b>任务详情</b><button class="modal-close" onclick="closeDetail()">×</button></div>
+<div id="detailBody"></div>
+</div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+var HOST = (location.hostname === '127.0.0.1' || location.hostname === 'localhost') ? '192.168.68.1' : location.hostname;
+var RPC = 'http://' + HOST + ':6800/jsonrpc';
+var TOKEN = 'jdc2026';
+var seq = 0;
+var ALL = [], FILTER = 'all', SORT = 'down', SORT_DESC = true, GLOBAL_DIR = '';
+var SELECTED = {};
+var TIME_KEY = 'jdc_dl_times_v1';
+var TIMES = {};
+try { TIMES = JSON.parse(localStorage.getItem(TIME_KEY) || '{}'); } catch(e){ TIMES = {}; }
+document.getElementById('ep').textContent = RPC;
+
+// aria2 RPC 没有时间字段，前端按 gid 记录首次出现时间（页面开着才会记准）
+function stampTimes(){
+  var now = Date.now(), changed = false;
+  ALL.forEach(function(t){
+    if (!TIMES[t.gid]) { TIMES[t.gid] = {add:now, done:0}; changed = true; }
+    if (t.status === 'complete' && !TIMES[t.gid].done) { TIMES[t.gid].done = now; changed = true; }
+  });
+  if (changed) {
+    try { localStorage.setItem(TIME_KEY, JSON.stringify(TIMES)); } catch(e){}
+  }
+}
+function fmtTime(ts){
+  if (!ts) return '—';
+  var d = new Date(ts);
+  function p(n){ return n<10?'0'+n:''+n; }
+  var today = new Date(); today.setHours(0,0,0,0);
+  var hm = p(d.getHours())+':'+p(d.getMinutes());
+  if (d.getTime() >= today.getTime()) return '今天 '+hm;
+  return (d.getMonth()+1)+'/'+d.getDate()+' '+hm;
+}
+
+function rpc(method, params) {
+  return fetch(RPC, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({jsonrpc:'2.0', id:String(++seq), method:method, params:['token:'+TOKEN].concat(params||[])})
+  }).then(function(r){ return r.json(); }).then(function(j){
+    if (j.error) throw new Error(j.error.message);
+    return j.result;
+  });
+}
+function toast(msg){
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'show';
+  clearTimeout(toast._t);
+  toast._t = setTimeout(function(){ t.className = ''; }, 1800);
+}
+// 网页确认弹窗：showConfirm(title, htmlMsg, buttons) buttons=[{label,cls,onClick}]
+function showConfirm(title, htmlMsg, buttons){
+  document.getElementById('cfTitle').textContent = title;
+  document.getElementById('cfMsg').innerHTML = htmlMsg;
+  var box = document.getElementById('cfBtns');
+  box.innerHTML = '';
+  (buttons||[]).forEach(function(b){
+    var el = document.createElement('button');
+    el.textContent = b.label;
+    if (b.cls) el.className = b.cls;
+    el.onclick = function(){ closeConfirm(); if (b.onClick) b.onClick(); };
+    box.appendChild(el);
+  });
+  document.getElementById('confirmModal').className = 'modal show';
+}
+function closeConfirm(){ document.getElementById('confirmModal').className = 'modal'; }
+function showDetail(text){
+  document.getElementById('detailBody').textContent = text;
+  document.getElementById('detailModal').className = 'modal show';
+}
+function closeDetail(){ document.getElementById('detailModal').className = 'modal'; }
+function copyToken(){
+  var ta = document.createElement('textarea');
+  ta.value = 'token:' + TOKEN;
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); toast('已复制 token:' + TOKEN); }
+  catch(e){ toast('复制失败，请手动选取'); }
+  document.body.removeChild(ta);
+}
+function fmtSize(n) {
+  n = Number(n)||0;
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n/1024).toFixed(1) + ' KB';
+  if (n < 1073741824) return (n/1048576).toFixed(1) + ' MB';
+  return (n/1073741824).toFixed(2) + ' GB';
+}
+function fmtSpeed(n) { return n > 0 ? fmtSize(n)+'/s' : '—'; }
+function pct(t) {
+  var total = Number(t.totalLength)||0;
+  return total ? Math.min(100, (Number(t.completedLength)||0)/total*100) : 0;
+}
+function eta(t){
+  var sp = Number(t.downloadSpeed)||0;
+  if (sp <= 0) return '—';
+  var left = (Number(t.totalLength)||0) - (Number(t.completedLength)||0);
+  if (left <= 0) return '—';
+  var s = Math.round(left/sp);
+  if (s < 60) return s + ' 秒';
+  if (s < 3600) return Math.floor(s/60) + ' 分 ' + (s%60) + ' 秒';
+  return Math.floor(s/3600) + ' 时 ' + Math.floor((s%3600)/60) + ' 分';
+}
+function esc(s) { return String(s||'').replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+var ST = {active:'下载中', waiting:'等待中', paused:'已暂停', complete:'已完成', error:'错误', removed:'已移除'};
+
+function rowHtml(t) {
+  var files = t.files||[];
+  var name = files.length ? (files[0].path||'').split('/').pop() : t.gid;
+  var path = files.length ? files[0].path : (t.dir||'');
+  var p = pct(t);
+  var gid = t.gid;
+  var ops = '';
+  if (t.status === 'active' || t.status === 'waiting') {
+    ops += '<button class="op-blue" onclick="act(\'forcePause\',\''+gid+'\')">暂停</button>';
+    ops += '<button class="op-red" onclick="act(\'forceRemove\',\''+gid+'\')">删除</button>';
+  } else if (t.status === 'paused') {
+    ops += '<button class="op-green" onclick="act(\'unpause\',\''+gid+'\')">继续</button>';
+    ops += '<button class="op-blue" onclick="move(\''+gid+'\',0)">置顶</button>';
+    ops += '<button class="op-blue" onclick="retry(\''+gid+'\')">重试</button>';
+    ops += '<button class="op-red" onclick="act(\'forceRemove\',\''+gid+'\')">删除</button>';
+  } else if (t.status === 'complete') {
+    if (path) ops += '<button class="op-green" onclick="fetchLocal(\''+esc(path).replace(/'/g,"\\'")+'\')">下载到本地</button>';
+    ops += '<button class="op-blue" onclick="retry(\''+gid+'\')">重试</button>';
+    ops += '<button class="op-red" onclick="clearAsk(\''+gid+'\')">清除</button>';
+  } else {
+    ops += '<button class="op-blue" onclick="retry(\''+gid+'\')">重试</button>';
+    ops += '<button class="op-red" onclick="clearAsk(\''+gid+'\')">清除</button>';
+  }
+  ops += '<button class="op-gray" onclick="detail(\''+gid+'\')">详情</button>';
+  var ti = TIMES[t.gid] || {};
+  var addTime = ti.add ? ('<div class="date">'+fmtTime(ti.add)+'</div>') : '<div class="date">—</div>';
+  var doneTime = ti.done ? '<div class="date" style="color:var(--green)">完成 '+fmtTime(ti.done)+'</div>' : '';
+  return '<tr><td class="sel"><input type="checkbox" class="rowchk" data-gid="'+gid+'" '+(SELECTED[gid]?'checked':'')+' onchange="toggleOne(this)"></td>' +
+    '<td><div class="name" title="'+esc(path)+'">'+esc(name)+'</div><div class="path">'+esc(path)+'</div><div class="prog"><i class="'+(p>=100?'done':'')+'" style="width:'+p.toFixed(1)+'%"></i></div></td>' +
+    '<td>'+fmtSize(t.totalLength)+'</td>' +
+    '<td>'+p.toFixed(1)+'%<br><span style="color:var(--muted);font-size:10px">'+fmtSize(t.completedLength)+'</span></td>' +
+    '<td>'+fmtSpeed(t.downloadSpeed)+'</td>' +
+    '<td>'+eta(t)+'</td>' +
+    '<td>'+addTime+doneTime+'</td>' +
+    '<td><span class="badge st-'+t.status+'">'+(ST[t.status]||t.status)+'</span></td>' +
+    '<td class="ops">'+ops+'</td></tr>';
+}
+
+function render() {
+  var q = (document.getElementById('search').value||'').toLowerCase();
+  var rows = ALL.filter(function(t){
+    if (FILTER !== 'all' && t.status !== FILTER) return false;
+    if (q) {
+      var f = t.files||[];
+      var nm = f.length ? (f[0].path||'') : t.gid;
+      if (nm.toLowerCase().indexOf(q) < 0) return false;
+    }
+    return true;
+  });
+  rows.sort(function(a,b){
+    var va, vb;
+    switch(SORT){
+      case 'name':
+        va = ((a.files||[{}])[0].path||'').toLowerCase(); vb = ((b.files||[{}])[0].path||'').toLowerCase(); break;
+      case 'size': va = Number(a.totalLength)||0; vb = Number(b.totalLength)||0; break;
+      case 'progress': va = pct(a); vb = pct(b); break;
+      case 'down': va = Number(a.downloadSpeed)||0; vb = Number(b.downloadSpeed)||0; break;
+      case 'up': va = Number(a.uploadSpeed)||0; vb = Number(b.uploadSpeed)||0; break;
+      case 'eta':
+        va = (Number(a.downloadSpeed)||0)>0 ? (Number(a.totalLength)-Number(a.completedLength))/Number(a.downloadSpeed) : 1e15;
+        vb = (Number(b.downloadSpeed)||0)>0 ? (Number(b.totalLength)-Number(b.completedLength))/Number(b.downloadSpeed) : 1e15;
+        break;
+      case 'date':
+        va = (TIMES[a.gid]||{}).add || 0; vb = (TIMES[b.gid]||{}).add || 0; break;
+      default: va = 0; vb = 0;
+    }
+    if (typeof va === 'string') return SORT_DESC ? (va<vb?1:va>vb?-1:0) : (va>vb?1:va<vb?-1:0);
+    return SORT_DESC ? vb-va : va-vb;
+  });
+  document.getElementById('cnt').textContent = '显示 ' + rows.length + ' / ' + ALL.length + ' 个任务';
+  document.getElementById('list').innerHTML = rows.length ? rows.map(rowHtml).join('') : '<tr><td colspan="9" class="empty">'+(ALL.length?'没有符合筛选条件的任务':'没有下载任务 —— 点右上角「+ 新建任务」添加')+'</td></tr>';
+  ['name','size','progress','down','eta','date'].forEach(function(k){
+    var el = document.getElementById('ar-'+k);
+    if (el) el.textContent = (SORT===k ? (SORT_DESC?'↓':'↑') : '');
+  });
+  updateSel();
+}
+function setSort(k){
+  if (SORT === k) SORT_DESC = !SORT_DESC;
+  else { SORT = k; SORT_DESC = (k !== 'name'); }
+  render();
+}
+function setFilter(f, el){
+  FILTER = f;
+  var bs = document.querySelectorAll('.tabs button');
+  for (var i=0;i<bs.length;i++) bs[i].className = '';
+  el.className = 'on';
+  render();
+}
+
+function refresh() {
+  Promise.all([
+    rpc('aria2.getGlobalStat'),
+    rpc('aria2.tellActive'),
+    rpc('aria2.tellWaiting', [0, 200]),
+    rpc('aria2.tellStopped', [0, 200])
+  ]).then(function(res){
+    var g = res[0], a = res[1], w = res[2], s = res[3];
+    document.getElementById('err').style.display = 'none';
+    document.getElementById('s-dl').textContent = fmtSpeed(g.downloadSpeed);
+    document.getElementById('s-ul').textContent = fmtSpeed(g.uploadSpeed);
+    document.getElementById('s-active').textContent = g.numActive;
+    document.getElementById('s-wait').textContent = g.numWaiting;
+    document.getElementById('s-stop').textContent = g.numStopped;
+    ALL = a.concat(w, s);
+    stampTimes();
+    var live = {};
+    ALL.forEach(function(t){ live[t.gid] = 1; });
+    Object.keys(SELECTED).forEach(function(g){ if (!live[g]) delete SELECTED[g]; });
+    render();
+  }).catch(function(e){
+    showError(e.message);
+  });
+}
+
+function showError(msg){
+  var el = document.getElementById('err');
+  el.innerHTML =
+    '<div class="etitle">RPC 连接失败</div>' +
+    '<div class="emsg">' + esc(msg) + '</div>' +
+    '<div>按下面顺序排查（SSH 登录路由器执行）：</div>' +
+    '<ol>' +
+    '<li>看进程：<code onclick="cpCmd(this)">ps | grep downloader</code> —— 应有 downloader 和 rpcwrapper 两行</li>' +
+    '<li>看端口：<code onclick="cpCmd(this)">netstat -lnt | grep 6800</code> —— 应有 LISTEN</li>' +
+    '<li>没进程就启动：<code onclick="cpCmd(this)">/etc/init.d/downloader start</code></li>' +
+    '<li>还不行看日志：<code onclick="cpCmd(this)">logread | grep -i aria</code></li>' +
+    '</ol>' +
+    '<div style="font-size:11px;color:#b91c1c">点上面任一命令可复制。若是「Cannot set properties of null」这类报错，是页面脚本问题，刷新（Ctrl+F5）通常可解决。</div>' +
+    '<button class="ebtn" onclick="refresh()">重试连接</button>';
+  el.style.display = 'block';
+}
+function cpCmd(el){
+  var ta = document.createElement('textarea'); ta.value = el.textContent;
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); toast('命令已复制'); } catch(e){}
+  document.body.removeChild(ta);
+}
+
+// 实时读取：aria2 全局 dir + 可用存储根（内置盘/U盘），动态填下拉
+function fmtKB(kb){
+  kb = Number(kb)||0;
+  if (kb < 1024) return kb + ' KB';
+  if (kb < 1048576) return (kb/1024).toFixed(1) + ' MB';
+  return (kb/1048576).toFixed(1) + ' GB';
+}
+function loadDir(){
+  var def = '/mnt/mmcblk0p4/Downloads';
+  Promise.all([
+    rpc('aria2.getGlobalOption'),
+    fetch('/cgi-bin/file_dl.cgi?action=roots').then(function(r){return r.json();}).catch(function(){return {roots:[]};})
+  ]).then(function(res){
+    var opt = res[0] || {};
+    var d = opt.dir || '';
+    GLOBAL_DIR = d || def;
+    document.getElementById('curdir').textContent = d || '未设置';
+    document.getElementById('dirLive').textContent = '（实时读取磁盘 + aria2 默认）';
+    var roots = (res[1]||{}).roots || [];
+
+    var opts = [];  // {path,label}
+    opts.push({path:d||def, label:(d||def) + '（aria2 当前默认）'});
+    // 每个存储根：根本身 + 常见下载子目录
+    roots.forEach(function(r){
+      var avail = r.avail_kb ? ('，可用 ' + fmtKB(r.avail_kb)) : '';
+      opts.push({path:r.path, label:r.name + ' 根 ' + r.path + '（' + r.fs + avail + '）'});
+      ['Downloads','JDBOXDownload'].forEach(function(sub){
+        var p = r.path + '/' + sub;
+        if (p !== (d||def)) opts.push({path:p, label:r.name + ' / ' + sub});
+      });
+    });
+    if (!roots.length) {
+      [def, '/mnt/mmcblk0p4/JDBOXDownload', '/opt/downloader'].forEach(function(p){
+        if (p !== (d||def)) opts.push({path:p, label:p});
+      });
+    }
+    // 去重
+    var seen = {}, uniq = [];
+    opts.forEach(function(o){ if(!seen[o.path]){ seen[o.path]=1; uniq.push(o); } });
+    var sel = document.getElementById('dir');
+    sel.innerHTML = uniq.map(function(o){
+      return '<option value="'+esc(o.path)+'">'+esc(o.label)+'</option>';
+    }).join('');
+    document.getElementById('pathInfo').textContent = '默认存到：' + (d||def);
+  }).catch(function(e){
+    document.getElementById('curdir').textContent = '读取失败';
+    document.getElementById('dirLive').textContent = '（读取失败，请手填路径）';
+    document.getElementById('dir').innerHTML = '<option value="/mnt/mmcblk0p4/Downloads">/mnt/mmcblk0p4/Downloads</option>';
+  });
+}
+
+function openNew(){ document.getElementById('newModal').className = 'show'; loadDir(); }
+function closeNew(){ document.getElementById('newModal').className = ''; }
+document.addEventListener('keydown', function(e){
+  if(e.key !== 'Escape') return;
+  closeNew(); closeConfirm(); closeDetail();
+});
+function targetDir(){
+  var custom = (document.getElementById('dirCustom').value||'').trim();
+  return custom || document.getElementById('dir').value || GLOBAL_DIR;
+}
+function addAll(){
+  var urls = document.getElementById('urls').value.split('\n').map(function(s){return s.trim();}).filter(Boolean);
+  var f = document.getElementById('torrent').files[0];
+  if (!urls.length && !f) { toast('请填链接或选择种子文件'); return; }
+  var dir = targetDir();
+  var jobs = [];
+  if (urls.length) jobs.push(rpc('aria2.addUri', [urls, {dir:dir}]));
+  if (f) {
+    var r = new FileReader();
+    var p = new Promise(function(resolve, reject){
+      r.onload = function(){
+        var b64 = String(r.result).split(',')[1];
+        rpc('aria2.addTorrent', [b64, [], {dir:dir}]).then(resolve).catch(reject);
+      };
+      r.onerror = reject;
+    });
+    r.readAsDataURL(f);
+    jobs.push(p);
+  }
+  Promise.all(jobs).then(function(){
+    document.getElementById('urls').value = '';
+    document.getElementById('torrent').value = '';
+    document.getElementById('dirCustom').value = '';
+    closeNew();
+    toast('已添加，保存到 ' + dir);
+    refresh();
+  }).catch(function(e){ toast('添加失败：' + e.message); });
+}
+
+function act(method, gid) {
+  var label = {forceRemove:'删除任务及文件', removeDownloadResult:'清除记录', forcePause:'暂停', unpause:'继续'}[method] || method;
+  if (method === 'forceRemove') {
+    var t = ALL.filter(function(x){return x.gid===gid;})[0] || {};
+    var files = t.files||[];
+    var nm = files.length ? (files[0].path||'').split('/').pop() : gid;
+    showConfirm('删除任务', '任务：<b>' + esc(nm) + '</b><br><br>'
+      + '<span class="warn">将删除任务及其已下载的文件，不可恢复。</span><br>'
+      + '如果只是想从列表移除、保留文件，请用「清除」。', [
+      {label:'取消'},
+      {label:'确认删除', cls:'danger-solid', onClick:function(){
+        rpc('aria2.forceRemove',[gid]).then(function(){delete SELECTED[gid];toast('任务和文件已删除');refresh();}).catch(function(e){toast('失败：'+e.message);});
+      }}
+    ]);
+    return;
+  }
+  rpc('aria2.'+method, [gid]).then(function(){ toast(label + '成功'); refresh(); }).catch(function(e){ toast('操作失败：' + e.message); });
+}
+function move(gid, pos){
+  rpc('aria2.changePosition', [gid, pos, 'POS_SET']).then(function(){ toast('已置顶'); refresh(); }).catch(function(e){ toast('操作失败：' + e.message); });
+}
+function retry(gid) {
+  rpc('aria2.tellStatus', [gid]).then(function(t){
+    var uris = [];
+    (t.files||[]).forEach(function(f){ (f.uris||[]).forEach(function(u){ if(u.uri) uris.push(u.uri); }); });
+    if (!uris.length) return null;
+    return rpc('aria2.addUri', [uris, {dir:t.dir||GLOBAL_DIR}]);
+  }).then(function(r){ if(r === null){ toast('没有可重试的下载链接'); return; } toast('已重新添加'); refresh(); }).catch(function(e){ toast('重试失败：' + e.message); });
+}
+// 下载到本地：前端 URL 编码绝对路径，CGI 校验后由 nginx sendfile 直传
+function fetchLocal(path){
+  var url = '/cgi-bin/file_dl.cgi?path=' + encodeURIComponent(path);
+  var a = document.createElement('a');
+  a.href = url; a.download = '';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  toast('已开始下载到本地');
+}
+// 清除任务：一个弹窗三个明确选项，不再用双层 confirm
+function clearAsk(gid){
+  var t = ALL.filter(function(x){return x.gid===gid;})[0] || {};
+  var files = t.files||[];
+  var nm = files.length ? (files[0].path||'').split('/').pop() : gid;
+  var msg = '任务：<b>' + esc(nm) + '</b><br>'
+          + '<span style="color:#888;font-size:12px">' + esc(files.length?files[0].path:'') + '</span><br><br>'
+          + '请选择清除方式：<br>'
+          + '· <b>只清记录</b>：从列表移除，文件保留在路由器<br>'
+          + '· <span class="warn">删除文件</span>：连已下载文件一起删，<span class="warn">不可恢复</span>';
+  showConfirm('清除任务', msg, [
+    {label:'取消'},
+    {label:'只清记录（保留文件）', cls:'op-blue', onClick:function(){
+      rpc('aria2.removeDownloadResult',[gid]).then(function(){delete SELECTED[gid];toast('记录已清除，文件保留');refresh();}).catch(function(e){toast('失败：'+e.message);});
+    }},
+    {label:'删除记录+文件', cls:'danger-solid', onClick:function(){
+      rpc('aria2.forceRemove',[gid]).then(function(){
+        rpc('aria2.removeDownloadResult',[gid]).then(function(){delete SELECTED[gid];toast('任务和文件已删除');refresh();}).catch(function(){refresh();});
+      }).catch(function(e){toast('失败：'+e.message);});
+    }}
+  ]);
+}
+function detail(gid){
+  rpc('aria2.tellStatus', [gid]).then(function(t){
+    var lines = [
+      'GID：' + t.gid,
+      '状态：' + (ST[t.status]||t.status),
+      '总大小：' + fmtSize(t.totalLength),
+      '已完成：' + fmtSize(t.completedLength) + '（' + pct(t).toFixed(1) + '%）',
+      '下载速度：' + fmtSpeed(t.downloadSpeed),
+      '上传速度：' + fmtSpeed(t.uploadSpeed),
+      '剩余时间：' + eta(t),
+      '添加时间：' + fmtTime((TIMES[t.gid]||{}).add) + '（本机记录）',
+      '完成时间：' + ((TIMES[t.gid]||{}).done ? fmtTime(TIMES[t.gid].done) : '未完成'),
+      '保存目录：' + (t.dir||''),
+      '连接数：' + t.connections + ' / 种子 peers：' + (t.numSeeders||0),
+      '错误：' + (t.errorMessage||'无'),
+      '文件：'
+    ];
+    (t.files||[]).forEach(function(f){ lines.push('  ' + f.path + '  ' + fmtSize(f.length)); });
+    showDetail(lines.join('\n'));
+  }).catch(function(e){ toast('获取详情失败：' + e.message); });
+}
+function toggleOne(el){
+  if (el.checked) SELECTED[el.getAttribute('data-gid')] = 1;
+  else delete SELECTED[el.getAttribute('data-gid')];
+  updateSel();
+}
+function toggleAll(el){
+  var rows = ALL.filter(function(t){
+    if (FILTER !== 'all' && t.status !== FILTER) return false;
+    var q = (document.getElementById('search').value||'').toLowerCase();
+    if (q) { var f=t.files||[]; var nm=f.length?(f[0].path||''):t.gid; if (nm.toLowerCase().indexOf(q)<0) return false; }
+    return true;
+  });
+  rows.forEach(function(t){ if (el.checked) SELECTED[t.gid]=1; else delete SELECTED[t.gid]; });
+  var boxes = document.querySelectorAll('.rowchk');
+  for (var i=0;i<boxes.length;i++) boxes[i].checked = el.checked;
+  updateSel();
+}
+function updateSel(){
+  var n = Object.keys(SELECTED).length;
+  document.getElementById('selInfo').textContent = '已选 ' + n + ' 个';
+  var all = document.getElementById('selAll'), all2 = document.getElementById('selAll2');
+  var boxes = document.querySelectorAll('.rowchk');
+  var allChecked = boxes.length > 0;
+  for (var i=0;i<boxes.length;i++) if (!boxes[i].checked) { allChecked = false; break; }
+  if (all) all.checked = allChecked;
+  if (all2) all2.checked = allChecked;
+}
+function doBatch(method, gids, label){
+  var jobs = gids.map(function(gid){ return rpc('aria2.'+method, [gid]).catch(function(){ return null; }); });
+  Promise.all(jobs).then(function(){
+    gids.forEach(function(g){ delete SELECTED[g]; });
+    toast(label + ' ' + gids.length + ' 个任务');
+    refresh();
+  }).catch(function(e){ toast('批量操作失败：' + e.message); });
+}
+function batchAct(method){
+  var gids = Object.keys(SELECTED);
+  if (!gids.length) { toast('先勾选任务'); return; }
+  var label = {forcePause:'暂停', unpause:'继续', remove:'移除任务', forceRemove:'删除任务+文件', removeDownloadResult:'清除记录'}[method] || method;
+
+  // 清除记录：一个弹窗三选一（跟单个任务一致）
+  if (method === 'removeDownloadResult') {
+    showConfirm('批量清除', '已选 <b>' + gids.length + '</b> 个任务，请选择清除方式：<br><br>'
+      + '· <b>只清记录</b>：从列表移除，文件保留在路由器<br>'
+      + '· <span class="warn">删除文件</span>：连已下载文件一起删，<span class="warn">不可恢复</span>', [
+      {label:'取消'},
+      {label:'只清记录（保留文件）', cls:'op-blue', onClick:function(){ doBatch('removeDownloadResult', gids, '已清除记录'); }},
+      {label:'删除记录+文件', cls:'danger-solid', onClick:function(){ doBatch('forceRemove', gids, '已删除任务和文件'); }}
+    ]);
+    return;
+  }
+  // 删除任务+文件 / 移除任务：网页确认
+  if (method === 'forceRemove' || method === 'remove') {
+    var isDel = (method === 'forceRemove');
+    showConfirm(isDel?'批量删除':'批量移除', '确定对这 <b>' + gids.length + '</b> 个任务执行「' + label + '」？<br><br>'
+      + (isDel ? '<span class="warn">文件会被一起删除，不可恢复。</span>' : '任务移除，但已下载的文件保留。'), [
+      {label:'取消'},
+      {label:isDel?'确认删除':'确认移除', cls:isDel?'danger-solid':'op-blue', onClick:function(){ doBatch(method, gids, label); }}
+    ]);
+    return;
+  }
+  doBatch(method, gids, label);
+}
+function bulk(method) { rpc('aria2.'+method).then(refresh).catch(function(e){toast(e.message);}); }
+function purge() {
+  showConfirm('清空已完成记录', '清除列表中所有已完成的下载记录？<br><br>· 只清列表记录，<b>文件全部保留</b>在路由器。<br>· 若要连文件一起删，请逐个任务或勾选后删除。', [
+    {label:'取消'},
+    {label:'确认清空记录', cls:'op-blue', onClick:function(){
+      rpc('aria2.purgeDownloadResult').then(function(){ toast('已清空记录，文件保留'); refresh(); }).catch(function(e){toast(e.message);});
+    }}
+  ]);
+}
+
+refresh();
+loadDir();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

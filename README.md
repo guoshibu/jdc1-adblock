@@ -1,11 +1,11 @@
 # JDC-1 官改固件 · 去广告与系统监控套件
 
 > 京东云无线宝一代（JDC-1P，MT7621AT）官改固件增强插件
-> 在保留原厂京东云挖豆（PCDN）功能的前提下，为 Web 后台注入 **去广告引擎 + 系统监控管理页**，全部功能持久化到 overlay、开机自启。
+> 在保留原厂京东云挖豆（PCDN）功能的前提下，为 Web 后台注入 **去广告引擎 + 系统监控管理页 + 离线下载 + 浏览器文件管理**，全部功能持久化到 overlay、开机自启。
 
 **作者**：[guoshibu](https://github.com/guoshibu)
 
-[![Version](https://img.shields.io/badge/Version-v1.1.0-orange.svg)](https://github.com/guoshibu/jdc1-adblock/releases)
+[![Version](https://img.shields.io/badge/Version-v1.2.0-orange.svg)](https://github.com/guoshibu/jdc1-adblock/releases)
 [![Platform](https://img.shields.io/badge/Platform-MT7621AT%20MIPS-blue.svg)](#)
 [![Firmware](https://img.shields.io/badge/Firmware-JDC4.0.0.r6636_ssh-important.svg)](#)
 [![AdGuard Home](https://img.shields.io/badge/AdGuard%20Home-v0.107.80-brightgreen.svg)](#)
@@ -23,6 +23,7 @@
 - [快速开始](#快速开始)
 - [端口与数据流](#端口与数据流)
 - [系统监控页详解](#系统监控页详解)
+- [离线下载与文件管理](#离线下载v12-新增)
 - [原理说明](#原理说明)
 - [性能评估](#性能评估)
 - [已知问题](#已知问题)
@@ -62,6 +63,26 @@
   - 表头点击排序（升/降序）、列宽拖拽（Excel 式）、斑马纹
   - 展开/收起全部进程，默认 TOP5
 - 刷新频率可选（1 / 5 / 10 秒 / 手动），手动「立即刷新」
+
+### 离线下载（v1.2 新增）
+
+恢复官改固件被 whiteout 屏蔽的**原厂 aria2 1.34.0**（`/sbin/downloader`），监听 JSON-RPC `6800`，下载到内置 54G eMMC 或 U 盘。
+
+- 去广告页「系统状态」里有一个「离线下载」stat，点开弹窗是完整下载管理页
+- 任务列表支持 6 列排序、状态筛选、文件名搜索、ETA 剩余时间、添加时间（本机记录）
+- 操作：暂停/继续/置顶/重试/删除/详情，勾选后可批量操作；删除/清除走网页二次确认，明确区分「只清记录」与「连文件删」
+- 新建任务弹窗：多行链接（含 magnet）、上传 .torrent、保存位置**实时读取** `aria2.getGlobalOption` + 运行时磁盘枚举（内置盘 + U 盘）
+- 「下载到本地」走浏览器 HTTP 直传，不依赖 Samba；nginx sendfile + Range 断点续传，千兆满速
+
+### 浏览器文件管理（v1.2 新增）
+
+完全替代 Samba 的 Web 文件管理器，去广告页「系统状态」第二个 stat 点开即用。
+
+- 内置盘 + U 盘根目录自动枚举，面包屑导航、目录/文件排序
+- **增删改查**：新建文件夹、重命名、删除、文本在线编辑（多行/中文/特殊字符保真）
+- **上传**：4MB 二进制分片 POST，nginx lua 追加写盘，任意大文件、进度条、覆盖确认
+- 下载复用统一下载链路；所有危险操作网页二次确认
+- 后端白名单 realpath 校验（防 `../` / 符号链接逃逸），写操作强制 POST（防 CSRF），静态下载链接有 nginx 正则白名单防绕过
 
 ### 其他
 
@@ -123,7 +144,13 @@ JDC-1-官改插件/
 │   ├── adblock_update.sh    # dnsmasq 去广告规则更新（下载所有源+转换+去重）
 │   ├── adblock_rebuild_sources.sh # 规则源重建：从预设标志+自定义源合成 sources.list
 │   ├── adguard_install.sh   # AdGuard Home 安装/启动/停止脚本
-│   └── sources.list         # dnsmasq 规则源列表（名称|URL）
+│   ├── sources.list         # dnsmasq 规则源列表（名称|URL）
+│   ├── download_web.html    # 离线下载管理页（→ /www/dl.html）
+│   ├── filemgr.html         # 文件管理器页面（→ /www/filemgr.html）
+│   ├── filemgr.cgi          # 文件管理 API（list/read/write/mkdir/rename/delete）
+│   ├── file_dl.cgi          # 统一下载 + 存储根枚举（→ 302 静态直传）
+│   ├── fm_upload.lua        # nginx lua 分片上传端点
+│   └── downloader.conf      # aria2 配置（RPC 6800 / token / 保存目录）
 ├── web/                     # Web 后台菜单入口
 │   ├── README.md            # 菜单入口 patch 说明
 │   └── main_patched.html    # 已注入「去广告」菜单的完整文件
@@ -150,6 +177,23 @@ JDC-1-官改插件/
 | `adguard_install.sh` | `/usr/bin/adguard_install.sh`     | AGH 安装/启动    | overlay |
 | `sources.list`       | `/etc/adblock/sources.list`       | dnsmasq 规则源  | overlay |
 | `web/main_patched.html` | `/www/PC/main.html`             | 注入「去广告」菜单项   | overlay |
+| `download_web.html` (v1.2) | `/www/dl.html`              | 离线下载管理页 | overlay |
+| `filemgr.html` (v1.2)  | `/www/filemgr.html`             | 文件管理器页面 | overlay |
+| `filemgr.cgi` (v1.2)   | `/www/cgi-bin/filemgr.cgi`      | 文件管理 JSON API | overlay |
+| `file_dl.cgi` (v1.2)   | `/www/cgi-bin/file_dl.cgi`      | 统一下载 + 根枚举 | overlay |
+| `fm_upload.lua` (v1.2) | `/www/fm_upload.lua`            | 分片上传（nginx lua） | overlay |
+| `downloader.conf` (v1.2) | `/etc/downloader.conf`         | aria2 配置 | overlay |
+
+### 下载器与静态链路（v1.2，install.sh 自动恢复）
+
+| 路径 | 说明 |
+| --- | --- |
+| `/sbin/downloader` / `/sbin/rpcwrapper` | 原厂 aria2 1.34.0（官改固件用 whiteout 屏蔽，install.sh 从 `/rom` 恢复到 overlay） |
+| `/etc/init.d/downloader` | 开机自启服务（procd） |
+| `/www/dl-mnt` → `/mnt` | 静态下载符号链接，nginx sendfile 直传 + Range |
+| `/etc/nginx/conf.d/jdc-web.conf` | 追加 `/fm_upload` location 与 `/dl-mnt/` 白名单正则 |
+
+> RPC token 默认 `jdc2026`（写在 `downloader.conf`，前端同步）。**建议部署后改成自己的随机值**。
 
 ### 运行时生成（非持久，重启清空）
 
@@ -308,6 +352,8 @@ python build_deploy.py
 
 - **管理页**：浏览器访问 `http://192.168.68.1/AD`（短链接，大小写不敏感，`/ad` 亦可；或 `http://192.168.68.1/cgi-bin/adblock.cgi`，或后台顶栏「去广告」菜单）
 - **AGH 控制台**：`http://192.168.68.1:3000`
+- **离线下载**：管理页「系统状态」→ 点「离线下载」stat，或直开 `http://192.168.68.1/dl.html`
+- **文件管理**：管理页「系统状态」→ 点「文件管理」stat，或直开 `http://192.168.68.1/filemgr.html`
 - **查看日志**：`logread | grep -i adguard` / `tail -f /tmp/syslog.log`
 
 **启停状态跟随**：dnsmasq 去广告与 AGH 的「停用/启用」状态都会持久化到 `/etc/adblock/`，重启后保持之前的状态（不会出现「关了又自己启动」）。
@@ -321,7 +367,8 @@ python build_deploy.py
 | `53`   | DNS  | dnsmasq      | 局域网 DNS 入口，上游转发到 AGH |
 | `5353` | DNS  | AdGuard Home | 主力过滤引擎               |
 | `3000` | HTTP | AdGuard Home | AGH Web 管理控制台        |
-| `80`   | HTTP | nginx        | 官改 Web 后台 + 管理页 CGI  |
+| `6800` | HTTP | aria2 (downloader) | JSON-RPC，下载任务管理（默认仅 LAN 可达，token 鉴权） |
+| `80`   | HTTP | nginx        | 官改 Web 后台 + 管理页 CGI + 下载/文件管理/上传 |
 
 **去广告数据流**：
 
@@ -399,7 +446,11 @@ python build_deploy.py
 
 ## 已知问题
 
-暂无已知问题（当前功能均已在实机验证通过）。
+- **U 盘 exFAT 分区无法挂载**：京东云固件（内核 4.4.198）没有 exFAT 驱动（`/lib/modules/` 里只有 `ntfs.ko`，`mount.exfat`/`exfat-fuse` 均不存在）。Ventoy 启动盘那种 exFAT 大分区会挂不上，只有 FAT32 的 EFI 小分区可用。分区本身识别正常（`/dev/sda1`、`sda2` 都在）。解法：把 U 盘格式化成 NTFS（`ntfs-3g` 可用）或 FAT32。
+- **文本在线编辑上限 1MB**：超过会提示不支持，请用下载/上传。
+- **不支持目录打包下载**：纯 tar 打包可行（32MB 仅 0.56s），但 gzip 压缩实测 32MB 需 38 秒（MIPS 软压缩太慢且占满 CPU），故未实现；且临时包清理与并发控制需要额外工程。
+- **RPC token 默认 `jdc2026`**：部署后建议改成随机值（`downloader.conf` 与前端 `dl.html` 需同步）。
+- **原厂 PCDN 负载**：京东云自带挖豆进程（ipes/fox）会有 fork 风暴导致 load 偏高，与本插件无关。
 
 ---
 
